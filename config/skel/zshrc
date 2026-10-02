@@ -1,0 +1,3 @@
+# ~/.zshrc del usuario (se crea solo si no existe; nunca se sobrescribe).
+# La config base vive en /etc/ai-workspace/zshrc y se actualiza con la imagen.
+[[ -r "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"

@@ -1,0 +1,116 @@
+# Variables: ver README.md -> "Variables del .env" y el archivo env.example
+name: ai-workspace
+
+services:
+  # ---------------------------------------------------------------------------
+  # Tailscale (sidecar): única puerta de entrada. Nada se publica en el servidor.
+  # ---------------------------------------------------------------------------
+  tailscale:
+    image: tailscale/tailscale:${TS_IMAGE_TAG:-stable}
+    container_name: ai-workspace-ts
+    hostname: ${TS_HOSTNAME:-ai-workspace}          # nombre del equipo en tu tailnet
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}                   # solo se usa en el primer registro
+      TS_HOSTNAME: ${TS_HOSTNAME:-ai-workspace}
+      TS_STATE_DIR: /var/lib/tailscale              # identidad persistente del nodo
+      TS_USERSPACE: "false"                         # modo kernel: TCP y UDP (mosh) completos
+      TS_ACCEPT_DNS: "false"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: "127.0.0.1:9002"
+    volumes:
+      - ts_state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN                                   # solo este contenedor; el workspace no
+    dns:
+      - ${DNS_SERVER:-1.1.1.1}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9002/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Workspace: comparte la red del sidecar (accesible solo desde la tailnet)
+  #   SSH :22 | Mosh :60000-60010/udp | Frontends :3000 :5173
+  # ---------------------------------------------------------------------------
+  ai-workspace:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_UID: ${USER_UID:-1000}                 # dueño del volumen ai_home
+        USER_GID: ${USER_GID:-1000}
+        NODE_MAJOR: ${NODE_MAJOR:-24}
+        NODE_VERSION: ${NODE_VERSION:-}             # vacío = última del major
+        NPM_GLOBAL_PACKAGES: ${NPM_GLOBAL_PACKAGES:-@anthropic-ai/claude-code @mariozechner/pi-coding-agent playwright @playwright/cli @playwright/mcp}
+        INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-true}
+        PG_MAJOR: ${PG_MAJOR:-17}
+        INSTALL_PG_SERVER: ${INSTALL_PG_SERVER:-false}
+        PG_EXTENSIONS: ${PG_EXTENSIONS:-pgvector}
+        INSTALL_MSSQL_TOOLS: ${INSTALL_MSSQL_TOOLS:-false}
+        INSTALL_HERDR: ${INSTALL_HERDR:-true}
+    image: ai-workspace:latest
+    container_name: ai-workspace
+    restart: unless-stopped
+    init: true                                      # recoge procesos zombie
+    network_mode: service:tailscale                 # sin "ports:" ni "hostname:" (los da el sidecar)
+    depends_on:
+      tailscale:
+        condition: service_healthy
+
+    security_opt:
+      - "no-new-privileges:true"
+    mem_limit: ${MEM_LIMIT:-8g}
+    cpus: ${CPUS:-4}
+    pids_limit: 2048
+    shm_size: "2gb"                                 # Chromium necesita /dev/shm grande
+
+    environment:
+      FIX_OWNERSHIP: ${FIX_OWNERSHIP:-false}
+      # PostgreSQL y Redis corren DENTRO del workspace con "devdb" (ver README).
+      # Solo SQL Server (opcional) va en contenedor aparte: no puede ejecutarse sin root.
+      SQLCMDSERVER: mssql
+      SQLCMDUSER: sa
+      SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:-}
+
+    volumes:
+      - ai_home:/home/ai                            # datos/config del usuario
+      - ai_workspace:/workspace                     # proyectos
+      - ssh_host_keys:/etc/ssh/host_keys            # identidad SSH del servidor
+
+  # ---------------------------------------------------------------------------
+  # SQL Server (opcional): COMPOSE_PROFILES=mssql en .env
+  # Es lo único que va aparte: no puede correr sin root dentro del workspace.
+  # El workspace lo ve como mssql:1433. No se publica al servidor ni a la tailnet.
+  # ---------------------------------------------------------------------------
+  mssql:
+    image: mcr.microsoft.com/mssql/server:${MSSQL_IMAGE_TAG:-2022-latest}
+    container_name: ai-workspace-mssql
+    profiles: [mssql]
+    platform: linux/amd64                          # SQL Server solo publica imagen x86_64
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer                          # gratis para desarrollo, no producción
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-}
+      TZ: ${TZ:-America/Bogota}
+    volumes:
+      - mssql_data:/var/opt/mssql
+    mem_limit: ${MSSQL_MEM_LIMIT:-4g}
+
+volumes:
+  ai_home:
+    external: true
+  ai_workspace:
+    external: true
+  ssh_host_keys:
+    name: ai_ssh_host_keys                          # nombre fijo aunque cambie la carpeta
+  ts_state:
+    name: ai_ts_state                               # borrar = nodo nuevo (requiere TS_AUTHKEY)
+  mssql_data:
+    name: ai_mssql_data

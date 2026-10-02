@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# =============================================================================
+# devdb - bases de datos locales DENTRO del workspace, SIN root
+#
+# La imagen NO trae servidores de BD. Se instalan bajo demanda en tu home:
+#   devdb install postgres [VERSION] [EXT...]  Ej: devdb install postgres 17 pgvector
+#   devdb install redis
+#   devdb uninstall postgres|redis             Borra binarios (NO los datos)
+#   devdb installed                            Qué hay instalado
+#
+#   devdb start   [postgres|redis|all]   Inicia (y crea el cluster la primera vez)
+#   devdb stop    [postgres|redis|all]
+#   devdb restart [postgres|redis|all]
+#   devdb status
+#   devdb psql    [args...]
+#   devdb logs    [postgres|redis]
+#   devdb enable  [postgres|redis|all]   Arranque automático con el contenedor
+#   devdb disable [postgres|redis|all]
+#   devdb tunnel                         Conectar DBeaver/Power BI desde tu PC
+#
+# Cómo instala sin root: "apt-get download" de los .deb oficiales (PGDG/Debian)
+# con un estado de apt propio en ~/.cache, y "dpkg-deb -x" dentro de
+# ~/.local/opt/devdb. Las librerías se resuelven con LD_LIBRARY_PATH.
+# Binarios y datos viven en el volumen ai_home: persisten al reconstruir.
+# Escucha solo en 127.0.0.1: nada fuera del contenedor puede conectarse.
+# =============================================================================
+set -Eeuo pipefail
+
+OPT="${DEVDB_OPT:-$HOME/.local/opt/devdb}"
+BASE="${DEVDB_HOME:-$HOME/.local/share/devdb}"
+APT_HOME="$HOME/.cache/devdb/apt"
+RUN_DIR="$BASE/run"
+CONF_DIR="$HOME/.config/devdb"
+PG_DATA="$BASE/postgres"
+PG_LOG="$BASE/postgres.log"
+PG_PORT="${DEVDB_PG_PORT:-5432}"
+PG_USER="${USER:-ai}"
+PG_DB="${DEVDB_PG_DB:-dev}"
+PG_DEFAULT_VERSION="${DEVDB_PG_VERSION:-17}"
+REDIS_DIR="$BASE/redis"
+REDIS_PORT="${DEVDB_REDIS_PORT:-6379}"
+REDIS_LOG="$BASE/redis.log"
+REDIS_PID="$RUN_DIR/redis.pid"
+
+info() { echo "==> $*"; }
+die()  { echo "[devdb] $*" >&2; exit 1; }
+
+[[ "$(id -u)" -eq 0 ]] && die "No ejecutes devdb como root (usa el usuario del workspace)."
+
+# ============================================================ instalación sin root
+apt_user() {   # apt con estado propio en ~/.cache (no necesita root ni /var/lib/apt)
+  mkdir -p "$APT_HOME"/{lists/partial,archives/partial}
+  apt-get -q \
+    -o Dir::State::Lists="$APT_HOME/lists" \
+    -o Dir::State::status=/var/lib/dpkg/status \
+    -o Dir::Cache="$APT_HOME" \
+    -o Dir::Cache::archives="$APT_HOME/archives" \
+    -o Debug::NoLocking=1 \
+    -o APT::Sandbox::User="$(id -un)" \
+    "$@"
+}
+apt_cache_user() {
+  apt-cache \
+    -o Dir::State::Lists="$APT_HOME/lists" \
+    -o Dir::State::status=/var/lib/dpkg/status \
+    -o Dir::Cache="$APT_HOME" "$@"
+}
+
+# Descarga PKGS + dependencias que NO estén ya en la imagen y las extrae en DEST
+deb_userspace_install() {
+  local dest="$1"; shift
+  local work dep
+  work="$(mktemp -d)"
+  info "Actualizando índices de paquetes (en ~/.cache, sin root)..."
+  apt_user update >/dev/null 2>"$work/update.err" || { cat "$work/update.err" >&2; die "apt-get update falló"; }
+  grep -E '^(W|E):' "$work/update.err" | grep -v 'Permission denied' >&2 || true
+
+  info "Resolviendo dependencias de: $*"
+  # Recorrido propio: solo bajamos los paquetes pedidos y las LIBRERÍAS (lib*) que
+  # falten en la imagen. Se omiten debconf, locales, postgresql-common, etc.,
+  # que no hacen falta para ejecutar binarios desde el home.
+  local deps=() queue=("$@") seen=" " pkg
+  while (( ${#queue[@]} )); do
+    pkg="${queue[0]}"; queue=("${queue[@]:1}")
+    [[ "$seen" == *" $pkg "* ]] && continue
+    seen+="$pkg "
+    deps+=("$pkg")
+    while IFS= read -r dep; do
+      [[ "$seen" == *" $dep "* ]] && continue
+      [[ "$dep" == lib* ]] || continue
+      if dpkg-query -W -f='${Status}' "$dep" 2>/dev/null | grep -q 'install ok installed'; then continue; fi
+      queue+=("$dep")
+    done < <(apt_cache_user depends --no-recommends --no-suggests "$pkg" 2>/dev/null \
+             | sed -nE 's/^ *\|?(Pre)?Depends: ([^<][^ ]*).*/\2/p' | sed 's/:.*//' | sort -u)
+  done
+
+  info "Descargando ${#deps[@]} paquetes..."
+  ( cd "$work" && for dep in "${deps[@]}"; do apt_user download "$dep" >/dev/null 2>&1 || true; done )
+  ls "$work"/*.deb >/dev/null 2>&1 || die "No se descargó ningún paquete (¿hay salida a internet?)."
+  for p in "$@"; do ls "$work"/"${p}"_*.deb >/dev/null 2>&1 || die "No se pudo descargar $p (¿existe esa versión?)."; done
+
+  mkdir -p "$dest"
+  local deb; for deb in "$work"/*.deb; do dpkg-deb -x "$deb" "$dest"; done
+  ls "$work"/*.deb | xargs -n1 basename > "$dest/.devdb-packages"
+  rm -rf "$work"
+  info "Instalado en $dest"
+}
+
+lib_path() {   # LD_LIBRARY_PATH para binarios extraídos
+  local root="$1" p out=""
+  for p in "$root"/usr/lib/*-linux-gnu "$root"/lib/*-linux-gnu "$root"/usr/lib/postgresql/*/lib; do
+    [[ -d "$p" ]] && out+="${out:+:}$p"
+  done
+  echo "${out}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
+# ------------------------------------------------------------------ postgres
+pg_root() { ls -d "$OPT"/postgresql-* 2>/dev/null | sort -V | tail -n1; }
+
+pg_bin() {
+  local r d
+  r="$(pg_root)"
+  if [[ -n "$r" ]]; then
+    d="$(ls -d "$r"/usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)"
+    [[ -x "$d/initdb" ]] && { echo "$d"; return 0; }
+  fi
+  # Alternativa: servidor horneado en la imagen (INSTALL_PG_SERVER=true)
+  for d in $(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -rV); do
+    [[ -x "$d/initdb" ]] && { echo "$d"; return 0; }
+  done
+  return 1
+}
+need_pg() { pg_bin >/dev/null || die "PostgreSQL no está instalado. Ejecuta: devdb install postgres"; }
+
+pgx() {   # ejecuta un binario del servidor con sus librerías
+  local cmd="$1"; shift
+  local bin root; bin="$(pg_bin)"; root="${bin%/usr/lib/postgresql/*}"
+  LD_LIBRARY_PATH="$(lib_path "$root")" "$bin/$cmd" "$@"
+}
+
+pg_install() {
+  local ver="${1:-$PG_DEFAULT_VERSION}"; shift || true
+  [[ "$ver" =~ ^[0-9]+$ ]] || die "Versión inválida: $ver (ej: 15, 16, 17)"
+  local dest="$OPT/postgresql-$ver" pkgs=("postgresql-$ver" "postgresql-client-$ver") ext
+  for ext in "$@"; do pkgs+=("postgresql-$ver-$ext"); done
+  [[ -x "$dest/usr/lib/postgresql/$ver/bin/initdb" && $# -eq 0 ]] && { info "PostgreSQL $ver ya está instalado"; return 0; }
+  deb_userspace_install "$dest" "${pkgs[@]}"
+  LD_LIBRARY_PATH="$(lib_path "$dest")" "$dest/usr/lib/postgresql/$ver/bin/postgres" --version
+  if [[ -s "$PG_DATA/PG_VERSION" && "$(cat "$PG_DATA/PG_VERSION")" != "$ver" ]]; then
+    echo "[devdb] AVISO: tus datos son de PostgreSQL $(cat "$PG_DATA/PG_VERSION"); para usar $ver haz dump/restore o pg_upgrade." >&2
+  fi
+}
+
+pg_running() { [[ -d "$PG_DATA" ]] && pg_bin >/dev/null && pgx pg_ctl -D "$PG_DATA" status >/dev/null 2>&1; }
+
+pg_init() {
+  [[ -s "$PG_DATA/PG_VERSION" ]] && return 0
+  info "Creando cluster PostgreSQL en $PG_DATA"
+  mkdir -p "$PG_DATA" "$RUN_DIR"; chmod 700 "$PG_DATA"
+  if ! pgx initdb -D "$PG_DATA" -U "$PG_USER" --encoding=UTF8 --locale=C.UTF-8 \
+        --auth-local=trust --auth-host=trust >/dev/null; then
+    rm -rf "$PG_DATA"; die "initdb falló"
+  fi
+  cat >> "$PG_DATA/postgresql.conf" <<EOF
+
+# --- devdb ---
+listen_addresses = '127.0.0.1'
+port = $PG_PORT
+unix_socket_directories = '$RUN_DIR'
+timezone = 'America/Bogota'
+log_timezone = 'America/Bogota'
+shared_buffers = 256MB
+max_connections = 50
+EOF
+}
+
+pg_start() {
+  need_pg
+  pg_init
+  if pg_running; then info "PostgreSQL ya está corriendo (127.0.0.1:$PG_PORT)"; return 0; fi
+  mkdir -p "$RUN_DIR"
+  pgx pg_ctl -D "$PG_DATA" -l "$PG_LOG" -w -t 30 start >/dev/null \
+    || die "PostgreSQL no arrancó. Revisa: devdb logs"
+  if ! pgx psql -h "$RUN_DIR" -p "$PG_PORT" -d postgres -Atqc \
+        "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" | grep -q 1; then
+    pgx createdb -h "$RUN_DIR" -p "$PG_PORT" "$PG_DB"
+    info "Base de datos '$PG_DB' creada"
+  fi
+  info "PostgreSQL listo -> postgresql://$PG_USER@127.0.0.1:$PG_PORT/$PG_DB"
+}
+
+pg_stop() {
+  if pg_running; then pgx pg_ctl -D "$PG_DATA" -m fast -w stop >/dev/null; info "PostgreSQL detenido"
+  else info "PostgreSQL no estaba corriendo"; fi
+}
+
+pg_uninstall() {
+  pg_stop || true
+  rm -rf "$OPT"/postgresql-*
+  info "Binarios de PostgreSQL eliminados. Datos conservados en $PG_DATA"
+}
+
+# --------------------------------------------------------------------- redis
+redis_root() { echo "$OPT/redis"; }
+redis_bin() {
+  if [[ -x "$(redis_root)/usr/bin/redis-server" ]]; then echo "$(redis_root)/usr/bin"; return 0; fi
+  if command -v redis-server >/dev/null; then dirname "$(command -v redis-server)"; return 0; fi
+  return 1
+}
+redisx() {
+  local cmd="$1"; shift
+  local bin; bin="$(redis_bin)" || die "Redis no está instalado. Ejecuta: devdb install redis"
+  LD_LIBRARY_PATH="$(lib_path "$(redis_root)")" "$bin/$cmd" "$@"
+}
+redis_install() { deb_userspace_install "$(redis_root)" redis-server redis-tools; redisx redis-server --version; }
+redis_uninstall() { redis_stop || true; rm -rf "$(redis_root)"; info "Binarios de Redis eliminados. Datos conservados en $REDIS_DIR"; }
+
+redis_running() { [[ -f "$REDIS_PID" ]] && kill -0 "$(cat "$REDIS_PID")" 2>/dev/null; }
+
+redis_start() {
+  redis_bin >/dev/null || die "Redis no está instalado. Ejecuta: devdb install redis"
+  if redis_running; then info "Redis ya está corriendo (127.0.0.1:$REDIS_PORT)"; return 0; fi
+  mkdir -p "$REDIS_DIR" "$RUN_DIR"
+  redisx redis-server --bind 127.0.0.1 --port "$REDIS_PORT" --dir "$REDIS_DIR" \
+    --appendonly yes --save 60 1 --daemonize yes --pidfile "$REDIS_PID" --logfile "$REDIS_LOG"
+  for _ in $(seq 1 20); do redisx redis-cli -p "$REDIS_PORT" ping >/dev/null 2>&1 && break; sleep 0.3; done
+  info "Redis listo -> redis://127.0.0.1:$REDIS_PORT/0"
+}
+
+redis_stop() {
+  if redis_running; then redisx redis-cli -p "$REDIS_PORT" shutdown >/dev/null 2>&1 || kill "$(cat "$REDIS_PID")"; info "Redis detenido"
+  else info "Redis no estaba corriendo"; fi
+}
+
+# ------------------------------------------------------------------- general
+targets() {
+  case "${1:-postgres}" in
+    postgres|pg|postgresql) echo postgres ;;
+    redis)                  echo redis ;;
+    all)                    echo postgres redis ;;
+    *) die "Servicio desconocido: $1 (postgres|redis|all)" ;;
+  esac
+}
+fn() { [[ "$1" == postgres ]] && echo pg || echo "$1"; }
+each() { local action="$1" t; shift; for t in $(targets "${1:-postgres}"); do "$(fn "$t")_${action}"; done; }
+
+installed() {
+  local b
+  if b="$(pg_bin)"; then echo "postgres : $(pgx postgres --version)  ($b)"; else echo "postgres : no instalado  -> devdb install postgres"; fi
+  if b="$(redis_bin)"; then echo "redis    : $(redisx redis-server --version | awk '{print $3}')  ($b)"; else echo "redis    : no instalado  -> devdb install redis"; fi
+}
+
+status() {
+  if pg_running; then echo "postgres : corriendo  127.0.0.1:$PG_PORT  db=$PG_DB  datos=$PG_DATA"
+  elif pg_bin >/dev/null; then echo "postgres : detenido (instalado)"
+  else echo "postgres : no instalado"; fi
+  if redis_running; then echo "redis    : corriendo  127.0.0.1:$REDIS_PORT  datos=$REDIS_DIR"
+  elif redis_bin >/dev/null; then echo "redis    : detenido (instalado)"
+  else echo "redis    : no instalado"; fi
+  local a; a="$(ls "$CONF_DIR"/autostart.* 2>/dev/null | sed 's/.*autostart\.//' | tr '\n' ' ')"
+  echo "autostart: ${a:-ninguno}"
+}
+
+autostart() {   # lo llama entrypoint.sh al arrancar el contenedor
+  local f
+  for f in "$CONF_DIR"/autostart.*; do
+    [[ -e "$f" ]] || continue
+    # Proceso aparte: así set -e aplica dentro y un fallo no detiene a los demás
+    "$0" start "${f##*.}" || echo "[devdb] fallo al iniciar ${f##*.}" >&2
+  done
+}
+
+cmd="${1:-status}"; shift || true
+case "$cmd" in
+  install)
+    t="${1:-}"; shift || true
+    case "$t" in
+      postgres|pg|postgresql) pg_install "$@" ;;
+      redis) redis_install ;;
+      *) die "Uso: devdb install postgres [VERSION] [EXT...] | devdb install redis" ;;
+    esac ;;
+  uninstall) for t in $(targets "${1:-}"); do "$(fn "$t")_uninstall"; done ;;
+  installed) installed ;;
+  start)   each start "$@" ;;
+  stop)    each stop "$@" ;;
+  restart) each stop "$@"; each start "$@" ;;
+  status)  status ;;
+  psql)    if ! pg_running; then "$0" start postgres; fi
+           exec psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" "$@" ;;
+  logs)    case "${1:-postgres}" in redis) tail -n 50 "$REDIS_LOG" ;; *) tail -n 50 "$PG_LOG" ;; esac ;;
+  enable)  mkdir -p "$CONF_DIR"; for t in $(targets "${1:-postgres}"); do touch "$CONF_DIR/autostart.$(fn "$t")"; info "autostart activado: $t"; done ;;
+  disable) for t in $(targets "${1:-postgres}"); do rm -f "$CONF_DIR/autostart.$(fn "$t")"; info "autostart desactivado: $t"; done ;;
+  autostart) autostart ;;
+  tunnel)
+    cat <<EOF
+Desde tu PC (con Tailscale conectado), abre un túnel SSH y conecta tu cliente a localhost:
+  ssh -N -L 5432:127.0.0.1:$PG_PORT ai@ai-workspace
+  -> DBeaver / Power BI / pgAdmin: host=localhost port=5432 user=$PG_USER db=$PG_DB
+EOF
+    ;;
+  -h|--help|help) sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "Comando desconocido: $cmd (usa: devdb help)" ;;
+esac

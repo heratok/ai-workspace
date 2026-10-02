@@ -1,0 +1,62 @@
+# Paquetes del sistema (uno por línea). Se instalan en BUILD como root.
+# Para agregar algo: edita este archivo y reconstruye la imagen.
+# Las librerías de Chromium NO van aquí: las instala Playwright (--with-deps).
+
+# --- Base / red ---
+ca-certificates
+curl
+wget
+gnupg
+iproute2
+openssh-server
+openssh-client
+mosh
+rsync
+locales
+procps
+lsof
+
+# --- Shell y CLI ---
+bash
+bash-completion
+zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
+fzf
+ripgrep
+fd-find
+bat
+tree
+jq
+htop
+less
+nano
+vim
+tmux
+git
+git-lfs
+
+# --- Bases de datos ---
+# PostgreSQL (servidor + psql) y gh vienen de sus repos oficiales (Dockerfile, paso 1b)
+# Servidores (PostgreSQL, Redis) NO vienen: se instalan sin root con "devdb install"
+sqlite3
+redis-tools
+tzdata
+mariadb-client
+
+# --- Calidad / utilidades de desarrollo ---
+shellcheck
+direnv
+make
+
+# --- Compresión ---
+xz-utils
+zip
+unzip
+
+# --- Toolchain (módulos nativos de npm/pip sin root) ---
+build-essential
+pkg-config
+python3
+python3-venv
+python3-dev
