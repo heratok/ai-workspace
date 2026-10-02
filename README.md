@@ -100,7 +100,7 @@ Si el build falla, el contenedor anterior **sigue funcionando**: solo se reempla
 
 ### Limpieza y migraciones (para que escale)
 
-- **Migraciones** (`migrations/NNN-*.sh`): cada mejora publicada en GitHub puede traer un script que **limpia o adapta** lo que dejó la versión anterior (variables obsoletas del `.env`, volúmenes o contenedores renombrados…). Cada uno corre **una sola vez por servidor**, en orden, durante `upgrade`, `update` e `install`, y queda registrado en `logs/.migrations-done`. La `001` ya limpia los restos de las versiones anteriores, **sin borrar datos**. Cómo escribir una nueva: [`migrations/README.md`](migrations/README.md).
+- **Migraciones** (`migrations/NNN-*.sh`): cada mejora publicada en GitHub puede traer un script que **limpia o adapta** lo que dejó la versión anterior (variables obsoletas del `.env`, volúmenes o contenedores renombrados…). Cada uno corre **una sola vez por servidor**, en orden, durante `upgrade`, `update` e `install`, y queda registrado en `logs/.migrations-done`. La `001` ya limpia los restos de las versiones anteriores, **sin borrar datos**. La `002` convierte la vieja `NPM_GLOBAL_PACKAGES` del `.env` a los componentes `INSTALL_*` y deja lo que no reconoce en `NPM_EXTRA_PACKAGES`. Cómo escribir una nueva: [`migrations/README.md`](migrations/README.md).
 - **`./setup.sh clean`** (menú → 7, y automático después de cada `update`) hace tres cosas:
   - borra las imágenes viejas de `ai-workspace` que quedan al reconstruir; solo las de este proyecto, gracias a la etiqueta `org.ai-workspace.image`;
   - conserva los últimos 20 logs;
@@ -372,6 +372,19 @@ claude mcp add playwright -- playwright-mcp # registrar el servidor MCP en Claud
 | Otra versión del navegador de Playwright | `npx playwright install chromium` o `playwright-cli install-browser chromium` | No |
 | Un servidor de base de datos (PostgreSQL, Redis) | `devdb install postgres 17` o `devdb install redis` | No |
 | CLIs como binario (Go, Rust, Java, Terraform, kubectl, Bun, Deno…) | `mise use -g go@latest`, `mise use -g terraform`, `mise use -g bun` (busca con `mise registry`) | No |
+
+## Landing (arquitectura visual)
+
+En `landing/` hay una página estática en [Astro](https://astro.build) que explica la arquitectura: contenedores, flujo de instalación y arranque. No forma parte de la imagen ni de `setup.sh`.
+
+```bash
+cd landing
+npm ci
+npm run dev        # http://ai-workspace:4322 (el 4321 lo usa la bienvenida del servidor)
+npm run build      # genera landing/dist
+```
+
+**Despliegue en Vercel:** importa el repositorio en Vercel y pon **Root Directory = `landing`**. El archivo `landing/vercel.json` ya define el build (`npm ci` + `npm run build` → `dist`), las URLs limpias, encabezados de seguridad y la caché larga de `/_astro/*`. Cada push a `main` despliega de nuevo.
 
 ## Migración desde v1
 
