@@ -48,6 +48,28 @@ Auth key (oculta):
 
 ## Instalación
 
+### Opción A: un solo comando
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh | bash
+```
+
+Clona el repositorio en `~/ai-workspace` (o lo actualiza si ya existe) y ejecuta `setup.sh install`. Las preguntas (auth key, clave SSH, componentes) se responden igual que en la opción B.
+
+```bash
+# Sin preguntas
+curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh \
+  | bash -s -- --authkey tskey-auth-XXXX --pubkey 'ssh-ed25519 AAAA...'
+
+# En otra carpeta (por defecto: ~/ai-workspace)
+curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh \
+  | AIWS_DIR=/opt/ai-workspace bash
+```
+
+Requiere `git` y Docker con `docker compose`. Si prefieres revisar el script antes de ejecutarlo: `curl -fsSLO …/install.sh && less install.sh && bash install.sh`.
+
+### Opción B: clonar a mano
+
 ```bash
 # En el servidor (recomendado: desde GitHub, así luego se actualiza solo)
 git clone https://github.com/heratok/ai-workspace.git
