@@ -373,19 +373,6 @@ claude mcp add playwright -- playwright-mcp # registrar el servidor MCP en Claud
 | Un servidor de base de datos (PostgreSQL, Redis) | `devdb install postgres 17` o `devdb install redis` | No |
 | CLIs como binario (Go, Rust, Java, Terraform, kubectl, Bun, Deno…) | `mise use -g go@latest`, `mise use -g terraform`, `mise use -g bun` (busca con `mise registry`) | No |
 
-## Landing (arquitectura visual)
-
-En `landing/` hay una página estática en [Astro](https://astro.build) que explica la arquitectura: contenedores, flujo de instalación y arranque. No forma parte de la imagen ni de `setup.sh`.
-
-```bash
-cd landing
-npm ci
-npm run dev        # http://ai-workspace:4322 (el 4321 lo usa la bienvenida del servidor)
-npm run build      # genera landing/dist
-```
-
-**Despliegue en Vercel:** importa el repositorio en Vercel y pon **Root Directory = `landing`**. El archivo `landing/vercel.json` ya define el build (`npm ci` + `npm run build` → `dist`), las URLs limpias, encabezados de seguridad y la caché larga de `/_astro/*`. Cada push a `main` despliega de nuevo.
-
 ## Migración desde v1
 
 1. En la carpeta v1, ejecuta `docker compose down`. Los volúmenes `ai_home` y `ai_workspace` no se tocan.
