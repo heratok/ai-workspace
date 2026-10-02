@@ -12,6 +12,11 @@ const terminal = [
   { c: 'dim', t: '  BD local : devdb start (PostgreSQL) | devdb start redis' },
 ];
 
+const instalacion = [
+  ['Un solo comando', 'curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh | bash'],
+  ['O clonando a mano', 'git clone https://github.com/heratok/ai-workspace.git && cd ai-workspace && ./setup.sh'],
+];
+
 const instalar = [
   ['Valida requisitos', 'Docker + plugin compose v2 y /dev/net/tun. En el servidor no se instala nada más.'],
   ['Normaliza y configura', 'Corrige CRLF, crea .env (600) desde env.example y genera secretos.'],
@@ -103,6 +108,11 @@ const comandos = [
           <a class="btn primario" href="#diagrama">Explorar el diagrama
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></a>
           <a class="btn" href="#operacion">Cómo se actualiza</a>
+        </div>
+        <div class="instalar rv">
+          {instalacion.map(([t, c]) => (
+            <button class="cmd" data-copiar={c}><span>{t}</span><code>{c}</code><em class="mono">copiar</em></button>
+          ))}
         </div>
       </div>
 
@@ -413,6 +423,11 @@ const comandos = [
   .cmd span { color: var(--muted); font-size: .82rem; }
   .cmd em { position: absolute; top: .8rem; right: .9rem; font-style: normal; font-size: .68rem; color: var(--subtle); opacity: 0; transition: opacity .15s; }
   .cmd:hover em, .cmd:focus-visible em { opacity: 1; }
+
+  /* Instalación en el hero */
+  .instalar { display: grid; gap: .5rem; margin-top: 1.5rem; max-width: 100%; }
+  .instalar .cmd span { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+  .instalar .cmd code { overflow-wrap: anywhere; line-height: 1.5; }
 
   /* Pie */
   .pie { margin-top: 8rem; padding-bottom: 2.5rem; color: var(--subtle); font-size: .8rem; overflow: hidden; }
