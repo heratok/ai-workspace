@@ -1,328 +1,421 @@
 ---
 import Base from '../layouts/Base.astro';
+import Diagrama from '../components/Diagrama.astro';
 
-const contenedores = [
-  { n: 'ai-workspace-ts', r: 'Sidecar Tailscale', d: 'Única puerta de entrada. Tiene NET_ADMIN y /dev/net/tun; registra el nodo en la tailnet y su identidad persiste en ai_ts_state.', tipo: 'vpn' },
-  { n: 'ai-workspace', r: 'Entorno de desarrollo', d: 'Debian 12 con sshd, mosh, agentes de IA y herramientas. Usa network_mode: service:tailscale, así que no publica puertos ni tiene red propia.', tipo: 'app' },
-  { n: 'ai-workspace-mssql', r: 'SQL Server (opcional)', d: 'Solo con COMPOSE_PROFILES=mssql. Va aparte porque no puede correr sin root. El workspace lo ve como mssql:1433; no llega a la tailnet.', tipo: 'local' },
+const terminal = [
+  { c: 'prompt', t: './setup.sh install' },
+  { c: 'info', t: '==> Clave autorizada: 256 SHA256:… (ED25519)' },
+  { c: 'ok', t: 'Listo. Accesible SOLO desde tu tailnet.' },
+  { c: 'dim', t: '  SSH   : ssh ai@ai-workspace' },
+  { c: 'dim', t: '  Mosh  : mosh -p 60000:60010 ai@ai-workspace' },
+  { c: 'dim', t: '  Web   : http://ai-workspace:3000  |  :5173' },
+  { c: 'dim', t: '  BD local : devdb start (PostgreSQL) | devdb start redis' },
 ];
 
 const instalar = [
   ['Valida requisitos', 'Docker + plugin compose v2 y /dev/net/tun. En el servidor no se instala nada más.'],
   ['Normaliza y configura', 'Corrige CRLF, crea .env (600) desde env.example y genera secretos.'],
-  ['Pregunta lo interactivo', 'Auth key de Tailscale (o link de login) y tu clave SSH pública. Después ya no pregunta nada.'],
+  ['Pregunta lo interactivo', 'Auth key de Tailscale (o link de login) y tu clave SSH. Después no pregunta nada.'],
   ['Sigue en segundo plano', 'setsid + nohup: si se cae SSH la instalación continúa. ./setup.sh progress la retoma.'],
   ['Migraciones y volúmenes', 'Aplica migrations/NNN-*.sh pendientes y crea ai_home y ai_workspace.'],
-  ['Build y arranque', 'Construye la imagen y levanta los contenedores; el workspace espera a que el sidecar esté healthy.'],
-  ['Limpia y autoriza', 'Borra la auth key del .env una vez registrado el nodo y autoriza tu clave SSH.'],
-  ['Diagnóstico', 'ws-doctor revisa herramientas, rutas y permisos, y se imprime el resumen de conexión.'],
+  ['Build y arranque', 'Construye la imagen; el workspace espera a que el sidecar esté healthy.'],
+  ['Limpia y autoriza', 'Borra la auth key del .env tras registrar el nodo y autoriza tu clave SSH.'],
+  ['Diagnóstico', 'ws-doctor revisa herramientas, rutas y permisos e imprime cómo conectarte.'],
 ];
 
 const arranque = [
-  ['Clave de host SSH', 'ed25519 persistente en ai_ssh_host_keys: los clientes no ven "host key changed" al reconstruir.'],
-  ['Home y workspace', 'Corrige el dueño de los volúmenes (FIX_OWNERSHIP=true hace chown recursivo una sola vez).'],
+  ['Clave de host SSH', 'ed25519 persistente en ai_ssh_host_keys: nada de "host key changed" al reconstruir.'],
+  ['Home y workspace', 'Corrige el dueño de los volúmenes (FIX_OWNERSHIP=true hace chown recursivo una vez).'],
   ['Dotfiles', 'Siembra /etc/skel-ai sin sobrescribir lo que el usuario ya tiene.'],
   ['Rutas sin root', '~/.local/bin, ~/.npm-global, ~/.cache… con dueño ai para instalar sin privilegios.'],
-  ['runtime.env', 'Pasa SQLCMD* y DOPPLER_TOKEN a las sesiones SSH en /etc/ai-workspace/runtime.env (640 root:ai), regenerado en cada arranque.'],
+  ['runtime.env', 'SQLCMD* y DOPPLER_TOKEN llegan a SSH vía /etc/ai-workspace/runtime.env (640 root:ai).'],
   ['devdb autostart', 'Arranca como ai las bases marcadas con devdb enable.'],
   ['sshd', 'Valida la configuración (sshd -t) y queda en primer plano como proceso principal.'],
 ];
 
-const capas = [
-  { t: 'Sin puertos publicados', d: 'El compose no tiene ports:. Todo entra por la IP 100.x de Tailscale (WireGuard); desde Internet no hay nada que escanear.' },
-  { t: 'NET_ADMIN solo en el sidecar', d: 'El privilegio de red lo tiene el contenedor de Tailscale. El workspace no recibe capabilities ni /dev/net/tun.' },
-  { t: 'Usuario ai sin root', d: 'Sin sudo ni docker.sock. El entrypoint corre como root solo para preparar sshd; después todo es del usuario ai.' },
-  { t: 'no-new-privileges', d: 'Ningún binario setuid puede escalar privilegios dentro del contenedor.' },
-  { t: 'SSH endurecido', d: 'Solo clave pública, AllowUsers ai, sin root ni contraseña, MaxAuthTries 3, LoginGraceTime 30.' },
-  { t: 'Límites de recursos', d: 'mem_limit 8g, 4 CPU y 2048 pids (configurables). Un proceso desbocado no tumba el servidor.' },
-  { t: 'Secretos fuera de la imagen', d: '.env con permisos 600 y fuera de git, auth key borrada tras el registro y secretos de proyecto en Doppler.' },
-  { t: 'Bases locales en 127.0.0.1', d: 'PostgreSQL y Redis de devdb solo escuchan en loopback; desde tu PC se llega con un túnel SSH.' },
+const capasImagen = [
+  { t: 'Tu home · ai_home', d: 'npm i -g, uv tool, mise use, devdb install. Sin root y sin reconstruir.', k: 'usuario' },
+  { t: 'Extensiones del equipo', d: 'config/extra-root.sh y NPM_EXTRA_PACKAGES para lo que todos necesitan.', k: 'imagen' },
+  { t: 'Agentes de IA', d: 'Claude Code, Pi, Antigravity, Gentle AI, opencode, Herdr y Playwright + Chromium, cada uno con su INSTALL_*.', k: 'imagen' },
+  { t: 'Datos', d: 'Clientes psql 17, sqlite3, redis-cli y mariadb. Servidores bajo demanda con devdb.', k: 'imagen' },
+  { t: 'Lenguajes', d: 'Node 24 con pnpm/yarn, Python 3 con uv y mise para Go, Rust o Java.', k: 'imagen' },
+  { t: 'Base', d: 'debian:12-slim, config/packages.apt, locale en_US.UTF-8 y zona America/Bogota.', k: 'imagen' },
 ];
+
+const seguridad = [
+  { t: 'NET_ADMIN solo en el sidecar', d: 'El workspace no recibe capabilities ni /dev/net/tun.', i: 'red' },
+  { t: 'Usuario ai sin root', d: 'Sin sudo ni docker.sock. Root solo prepara sshd en el arranque.', i: 'user' },
+  { t: 'no-new-privileges', d: 'Ningún binario setuid puede escalar privilegios.', i: 'lock' },
+  { t: 'SSH endurecido', d: 'Solo clave pública, AllowUsers ai, MaxAuthTries 3, LoginGraceTime 30.', i: 'key' },
+  { t: 'Límites de recursos', d: '8 GB de RAM, 4 CPU y 2048 procesos: un proceso desbocado no tumba el servidor.', i: 'cpu' },
+  { t: 'Secretos fuera de la imagen', d: '.env 600 fuera de git, auth key borrada tras el registro, Doppler para proyectos.', i: 'vault' },
+  { t: 'Bases en 127.0.0.1', d: 'PostgreSQL y Redis de devdb solo en loopback; desde tu PC, túnel SSH.', i: 'db' },
+];
+
+const iconos: Record<string, string> = {
+  red: '<path d="M12 3v6M12 15v6M3 12h6M15 12h6"/><circle cx="12" cy="12" r="3"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  vault: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 9V7"/>',
+  db: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+};
 
 const volumenes = [
-  { v: 'ai_home', c: '/home/ai: configuración, instalaciones sin root y datos de devdb', r: 'Pierdes tu configuración y tus bases locales', g: 'warn' },
-  { v: 'ai_workspace', c: '/workspace: proyectos', r: 'Pierdes tus proyectos', g: 'danger' },
-  { v: 'ai_ssh_host_keys', c: 'Identidad SSH del servidor', r: 'Alerta de "host key changed" en los clientes', g: 'muted' },
-  { v: 'ai_ts_state', c: 'Identidad del nodo en Tailscale', r: 'Se crea un nodo nuevo y vuelve a pedir auth key', g: 'muted' },
-  { v: 'ai_mssql_data', c: 'Datos de SQL Server (si se usa)', r: 'Pierdes esas bases', g: 'danger' },
+  { v: 'ai_home', c: 'Configuración, instalaciones sin root y datos de devdb', r: 'Pierdes tu configuración y bases locales', n: 2 },
+  { v: 'ai_workspace', c: 'Tus proyectos en /workspace', r: 'Pierdes tus proyectos', n: 3 },
+  { v: 'ai_ssh_host_keys', c: 'Identidad SSH del servidor', r: 'Alerta "host key changed"', n: 1 },
+  { v: 'ai_ts_state', c: 'Identidad del nodo en Tailscale', r: 'Nodo nuevo; vuelve a pedir la auth key', n: 1 },
+  { v: 'ai_mssql_data', c: 'Datos de SQL Server (si se usa)', r: 'Pierdes esas bases', n: 3 },
 ];
 
-const imagen = [
-  { t: 'Base', d: 'debian:12-slim, paquetes de config/packages.apt, locale en_US.UTF-8, zona America/Bogota.' },
-  { t: 'Lenguajes', d: 'Node 24 (corepack: pnpm/yarn), Python 3 con uv y mise para Go, Rust, Java u otras versiones.' },
-  { t: 'Datos', d: 'Clientes psql 17, sqlite3, redis-cli y mariadb. Servidores bajo demanda con devdb, sin root.' },
-  { t: 'Agentes', d: 'Claude Code, Pi, Antigravity (agy), Gentle AI, opencode, Herdr y Playwright con Chromium.' },
-  { t: 'Componentes', d: 'Cada uno es un ARG INSTALL_*=true|false. ./setup.sh components edita el .env y reconstruye.' },
-  { t: 'Extensión', d: 'config/extra-root.sh para binarios del equipo y NPM_EXTRA_PACKAGES para CLIs npm.' },
+const pipeline = [
+  { e: 'GitHub', t: 'push a main', d: 'CI: sintaxis, ShellCheck, compose válido, build completo y verificación de cada herramienta.' },
+  { e: 'servidor', t: 'upgrade', d: 'fetch + merge --ff-only. Stash de cambios locales, anota la versión previa y agrega variables nuevas al .env.' },
+  { e: 'servidor', t: 'migrate + update', d: 'Cada migración corre una sola vez. Si el build falla, el contenedor anterior sigue en pie.' },
+  { e: 'plan B', t: 'rollback', d: 'Vuelve a la versión anotada y reconstruye. clean borra solo las imágenes del proyecto.' },
 ];
 
 const comandos = [
-  ['install', 'Instala o reinstala; conserva los datos'],
-  ['upgrade', 'Descarga lo último de GitHub, migra y reconstruye'],
-  ['rollback', 'Vuelve a la versión anterior al último upgrade'],
-  ['components', 'Elige agentes y herramientas de la imagen'],
-  ['progress', 'Sigue en vivo la instalación en segundo plano'],
-  ['backup', 'Respalda home y proyectos en ./backups'],
-  ['clean [--deep]', 'Borra imágenes viejas, logs y respaldos antiguos'],
-  ['doctor', 'Diagnóstico de herramientas, rutas y permisos'],
+  ['install', 'Instala o reinstala; conserva datos'],
+  ['upgrade', 'Lo último de GitHub, migra y reconstruye'],
+  ['rollback', 'Vuelve a la versión anterior'],
+  ['components', 'Elige agentes y herramientas'],
+  ['progress', 'Sigue la instalación en vivo'],
+  ['backup', 'Respalda home y proyectos'],
+  ['clean --deep', 'Imágenes, logs y respaldos viejos'],
+  ['doctor', 'Diagnóstico de herramientas y permisos'],
 ];
 ---
 <Base title="Arquitectura ai-workspace">
-  <main class="wrap">
-    <header class="intro">
-      <p class="eyebrow">ai-workspace v2 · Arquitectura</p>
-      <h1>Un entorno de desarrollo aislado, accesible solo por Tailscale</h1>
-      <p class="lead">Dos contenedores Docker en un servidor Linux: un <strong>sidecar de Tailscale</strong> que es la única puerta de entrada
-        y el <strong>workspace</strong>, que comparte su red. El servidor no publica ningún puerto, el usuario <code>ai</code> no tiene root
-        y todo lo que importa vive en volúmenes que sobreviven a cada reconstrucción.</p>
-      <div class="claves">
-        <div><strong class="mono">0</strong><span>puertos publicados</span></div>
-        <div><strong class="mono">1</strong><span>script para operar todo</span></div>
-        <div><strong class="mono">5</strong><span>volúmenes persistentes</span></div>
-        <div><strong class="mono">0</strong><span>privilegios para el usuario</span></div>
+  <div class="fondo" aria-hidden="true"><div class="rejilla"></div><div class="orbe o1"></div><div class="orbe o2"></div></div>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero wrap">
+      <div class="hero-txt">
+        <a class="pill rv" href="#diagrama"><span class="live"></span>ai-workspace v2 · arquitectura</a>
+        <h1 class="rv">Una sola puerta.<br /><span class="grad">Cero puertos abiertos.</span></h1>
+        <p class="lead rv">Un entorno de desarrollo en Docker al que solo se llega por <strong>Tailscale</strong>. El sidecar es la única entrada,
+          el usuario <code>ai</code> no tiene root y todo lo importante vive en volúmenes que sobreviven a cada reconstrucción.</p>
+        <div class="cta rv">
+          <a class="btn primario" href="#diagrama">Explorar el diagrama
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></a>
+          <a class="btn" href="#operacion">Cómo se actualiza</a>
+        </div>
       </div>
-    </header>
 
-    <section id="diagrama">
-      <h2>Diagrama</h2>
-      <div class="card diagrama">
-        <svg viewBox="0 0 760 450" role="img" aria-label="Tu PC llega por Tailscale al sidecar, que comparte red con el workspace; los datos viven en volúmenes">
-          <defs><marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" class="punta"/></marker></defs>
-
-          <rect x="10" y="90" width="150" height="74" rx="10" class="nodo"/>
-          <text x="85" y="122" class="t">Tu PC</text>
-          <text x="85" y="142" class="s">en la tailnet</text>
-          <path d="M160 127 H282" class="flujo" marker-end="url(#fl)"/>
-          <text x="205" y="117" class="s ac">WireGuard</text>
-
-          <rect x="10" y="300" width="150" height="64" rx="10" class="nodo bloq"/>
-          <text x="85" y="328" class="t dn">Internet público</text>
-          <text x="85" y="347" class="s">sin puertos abiertos</text>
-          <path d="M160 332 H246" class="corte"/>
-          <text x="203" y="324" class="s dn">✕</text>
-
-          <rect x="250" y="10" width="500" height="430" rx="14" class="caja"/>
-          <text x="270" y="34" class="et">SERVIDOR LINUX · DOCKER ENGINE (sin nada más instalado)</text>
-
-          <rect x="268" y="48" width="464" height="240" rx="12" class="caja ns"/>
-          <text x="286" y="70" class="et">RED COMPARTIDA · network_mode: service:tailscale</text>
-
-          <rect x="286" y="86" width="170" height="186" rx="10" class="nodo"/>
-          <text x="371" y="114" class="t">Tailscale</text>
-          <text x="371" y="132" class="s">ai-workspace-ts · sidecar</text>
-          <text x="371" y="164" class="s m">cap NET_ADMIN</text>
-          <text x="371" y="182" class="s m">/dev/net/tun</text>
-          <text x="371" y="200" class="s m">healthz :9002</text>
-          <text x="371" y="236" class="s">tailscale0 · IP 100.x</text>
-          <text x="371" y="254" class="s">MagicDNS: ai-workspace</text>
-
-          <path d="M456 168 H476" class="flujo" marker-end="url(#fl)"/>
-
-          <rect x="480" y="86" width="234" height="186" rx="10" class="nodo"/>
-          <text x="597" y="114" class="t">ai-workspace</text>
-          <text x="597" y="132" class="s">Debian 12 · usuario ai · sin root</text>
-          <rect x="498" y="146" width="198" height="40" rx="8" class="app"/>
-          <text x="597" y="164" class="t ac">sshd :22 · mosh udp</text>
-          <text x="597" y="179" class="s">solo clave pública</text>
-          <rect x="498" y="194" width="198" height="30" rx="8" class="caja"/>
-          <text x="597" y="213" class="s m">dev servers :3000 · :5173</text>
-          <rect x="498" y="232" width="198" height="30" rx="8" class="caja"/>
-          <text x="597" y="251" class="s m">devdb → Postgres · Redis</text>
-
-          <path d="M597 272 V300" class="linea"/>
-          <rect x="480" y="300" width="234" height="44" rx="10" class="nodo opc"/>
-          <text x="597" y="319" class="t">mssql :1433</text>
-          <text x="597" y="335" class="s">opcional · COMPOSE_PROFILES=mssql</text>
-
-          <text x="286" y="374" class="et">VOLÚMENES · sobreviven a update y uninstall</text>
-          <rect x="268" y="384" width="108" height="40" rx="8" class="vol"/>
-          <text x="322" y="408" class="s m">ai_ts_state</text>
-          <rect x="387" y="384" width="108" height="40" rx="8" class="vol"/>
-          <text x="441" y="408" class="s m">ai_home</text>
-          <rect x="505" y="384" width="108" height="40" rx="8" class="vol"/>
-          <text x="559" y="408" class="s m">ai_workspace</text>
-          <rect x="624" y="384" width="108" height="40" rx="8" class="vol"/>
-          <text x="678" y="408" class="s m">ssh_host_keys</text>
-        </svg>
+      <div class="term entra" role="img" aria-label="Salida de ./setup.sh install">
+        <div class="term-bar"><i></i><i></i><i></i><span class="mono">ai@servidor — setup.sh</span></div>
+        <pre class="mono">{terminal.map((l, i) => <span class={`ln ${l.c}`} style={`--i:${i}`}>{l.c === 'prompt' ? <><b>$</b> {l.t}</> : l.t}{'\n'}</span>)}<span class="cursor" style={`--i:${terminal.length}`}>▋</span></pre>
       </div>
-      <div class="contenedores">
-        {contenedores.map(c => (
-          <article class="card"><span class={`chip ${c.tipo}`}>{c.r}</span><h3 class="mono">{c.n}</h3><p>{c.d}</p></article>
+    </section>
+
+    <section class="wrap stats rv">
+      <div><strong class="display">0</strong><span>puertos publicados en el servidor</span></div>
+      <div><strong class="display">1</strong><span>script para instalar, actualizar y operar</span></div>
+      <div><strong class="display">5</strong><span>volúmenes que persisten</span></div>
+      <div><strong class="display">0</strong><span>privilegios de root para el usuario</span></div>
+    </section>
+
+    <!-- DIAGRAMA -->
+    <section id="diagrama" class="wrap bloque">
+      <header class="cab rv"><span class="num mono">01</span><h2>Cómo encaja todo</h2>
+        <p>Dos contenedores comparten una sola pila de red. El workspace no tiene red propia: hereda la del sidecar de Tailscale.</p></header>
+      <Diagrama />
+    </section>
+
+    <!-- CICLO DE VIDA -->
+    <section id="ciclo" class="wrap bloque">
+      <header class="cab rv"><span class="num mono">02</span><h2>Ciclo de vida</h2>
+        <p>Todo se opera con <code>setup.sh</code>. Primero instala desde el servidor y luego el contenedor se prepara solo en cada arranque.</p></header>
+      <div class="tabs rv" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="instalar"><code>./setup.sh install</code><span>8 pasos</span></button>
+        <button role="tab" aria-selected="false" data-tab="arranque"><code>entrypoint.sh</code><span>7 pasos</span></button>
+      </div>
+      <ol class="pasos" data-panel="instalar">
+        {instalar.map(([t, d], i) => (<li class="rv" style={`--d:${i * 50}ms`}><span class="n display">{String(i + 1).padStart(2, '0')}</span><h3>{t}</h3><p>{d}</p></li>))}
+      </ol>
+      <ol class="pasos" data-panel="arranque" hidden>
+        {arranque.map(([t, d], i) => (<li><span class="n display">{String(i + 1).padStart(2, '0')}</span><h3>{t}</h3><p>{d}</p></li>))}
+      </ol>
+    </section>
+
+    <!-- IMAGEN -->
+    <section id="imagen" class="wrap bloque">
+      <header class="cab rv"><span class="num mono">03</span><h2>La imagen, capa por capa</h2>
+        <p>Lo del sistema va en la imagen. Lo del usuario va sin root en su home y no requiere reconstruir.</p></header>
+      <div class="pila">
+        {capasImagen.map((c, i) => (
+          <div class={`capa rv ${c.k}`} style={`--i:${i}`}>
+            <span class="k mono">{c.k === 'usuario' ? 'volumen · sin root' : `capa ${capasImagen.length - i - 1}`}</span>
+            <h3>{c.t}</h3><p>{c.d}</p>
+          </div>
+        ))}
+      </div>
+      <p class="nota rv">Cada agente es un <code>ARG INSTALL_*=true|false</code>. Con <code>./setup.sh components</code> eliges cuáles entran; lo que desmarcas sale de la imagen sin tocar tus datos.</p>
+    </section>
+
+    <!-- SEGURIDAD -->
+    <section id="seguridad" class="wrap bloque">
+      <header class="cab rv"><span class="num mono">04</span><h2>Seguridad por capas</h2>
+        <p>Pensado para datos sensibles: cada capa reduce lo que un atacante, o un error, puede alcanzar.</p></header>
+      <div class="bento">
+        <article class="card grande rv">
+          <div class="radar" aria-hidden="true"><span></span><span></span><span></span><b></b></div>
+          <h3>Sin puertos publicados</h3>
+          <p>El compose no tiene <code>ports:</code>. Todo entra por la IP 100.x de Tailscale sobre WireGuard; desde Internet no hay nada que escanear.</p>
+        </article>
+        {seguridad.map((s, i) => (
+          <article class="card rv" style={`--d:${i * 40}ms`}>
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" set:html={iconos[s.i]} />
+            <h3>{s.t}</h3><p>{s.d}</p>
+          </article>
         ))}
       </div>
     </section>
 
-    <section id="ciclo">
-      <h2>Ciclo de vida</h2>
-      <p class="nota sub">Todo se opera con <code>setup.sh</code>. En el servidor solo hace falta Docker.</p>
-      <div class="dos">
-        <div>
-          <h3 class="col">1 · <code>./setup.sh install</code></h3>
-          <ol class="pasos">
-            {instalar.map(([t, d], i) => (<li><span class="n mono">{i + 1}</span><div><h4>{t}</h4><p>{d}</p></div></li>))}
-          </ol>
-        </div>
-        <div>
-          <h3 class="col">2 · Arranque del contenedor (<code>entrypoint.sh</code>)</h3>
-          <ol class="pasos">
-            {arranque.map(([t, d], i) => (<li><span class="n mono">{i + 1}</span><div><h4>{t}</h4><p>{d}</p></div></li>))}
-          </ol>
-        </div>
+    <!-- PERSISTENCIA -->
+    <section class="wrap bloque">
+      <header class="cab rv"><span class="num mono">05</span><h2>Lo que persiste</h2>
+        <p><code>uninstall</code> conserva todo. Solo <code>uninstall --all</code> borra, después de ofrecer respaldo y pedir que escribas <code>BORRAR</code>.</p></header>
+      <div class="vols">
+        {volumenes.map(v => (
+          <article class="vol rv">
+            <div class="vol-top"><span class="mono">{v.v}</span>
+              <span class="riesgo" title={`Impacto si se borra: ${['', 'bajo', 'medio', 'alto'][v.n]}`}>{[1, 2, 3].map(x => <i class={x <= v.n ? `on n${v.n}` : ''}></i>)}</span></div>
+            <p>{v.c}</p>
+            <p class="si"><span>Si lo borras:</span> {v.r}</p>
+          </article>
+        ))}
       </div>
     </section>
 
-    <section>
-      <h2>Qué trae la imagen</h2>
-      <div class="capas">
-        {imagen.map(c => (<article class="card"><h3>{c.t}</h3><p>{c.d}</p></article>))}
-      </div>
-      <p class="nota">Regla: <strong>lo del sistema va en la imagen, lo del usuario va sin root en el home.</strong>
-        <code>npm i -g</code>, <code>uv tool</code>, <code>mise use</code> y <code>devdb install</code> escriben en <code>ai_home</code> y no requieren reconstruir.</p>
+    <!-- OPERACIÓN -->
+    <section id="operacion" class="wrap bloque">
+      <header class="cab rv"><span class="num mono">06</span><h2>Actualizaciones sin miedo</h2>
+        <p>Cada cambio se verifica antes de llegar al servidor, y siempre hay un camino de vuelta.</p></header>
+      <ol class="pipe">
+        {pipeline.map((p, i) => (
+          <li class="rv" style={`--d:${i * 90}ms`}><span class="punto"></span><span class="e mono">{p.e}</span><h3>{p.t}</h3><p>{p.d}</p></li>
+        ))}
+      </ol>
     </section>
 
-    <section id="seguridad">
-      <h2>Capas de seguridad</h2>
-      <div class="capas">
-        {capas.map(c => (<article class="card"><h3>{c.t}</h3><p>{c.d}</p></article>))}
+    <!-- COMANDOS -->
+    <section class="wrap bloque">
+      <header class="cab rv"><span class="num mono">07</span><h2>A mano</h2>
+        <p>Los comandos que más vas a usar. Haz clic para copiar.</p></header>
+      <div class="cmds">
+        {comandos.map(([c, d]) => (
+          <button class="cmd rv" data-copiar={`./setup.sh ${c}`}><code>./setup.sh {c}</code><span>{d}</span><em class="mono">copiar</em></button>
+        ))}
       </div>
-    </section>
-
-    <section>
-      <h2>Persistencia</h2>
-      <div class="card tabla">
-        <table>
-          <thead><tr><th>Volumen</th><th>Contenido</th><th>Si lo borras…</th></tr></thead>
-          <tbody>
-            {volumenes.map(v => (<tr><td class="mono">{v.v}</td><td>{v.c}</td><td><span class={`chip ${v.g}`}>{v.r}</span></td></tr>))}
-          </tbody>
-        </table>
-      </div>
-      <p class="nota"><code>uninstall</code> quita contenedores, red e imagen y <strong>conserva</strong> todos los volúmenes y el <code>.env</code>.
-        Solo <code>uninstall --all</code> los borra, después de ofrecer un respaldo y pedir que escribas <code>BORRAR</code>.</p>
-    </section>
-
-    <section id="operacion">
-      <h2>Actualizaciones seguras</h2>
-      <div class="flujo-op">
-        <div class="card paso"><span class="mono et2">GitHub</span><h3>push a main</h3><p>CI revisa la sintaxis y ShellCheck, valida el compose, construye la imagen y comprueba que existan todas las herramientas.</p></div>
-        <span class="sep" aria-hidden="true">→</span>
-        <div class="card paso"><span class="mono et2">servidor</span><h3>upgrade</h3><p>git fetch + merge --ff-only. Guarda tus cambios locales con stash, anota la versión previa y agrega al .env solo las variables nuevas.</p></div>
-        <span class="sep" aria-hidden="true">→</span>
-        <div class="card paso"><span class="mono et2">servidor</span><h3>migrate + update</h3><p>Cada migración corre una sola vez (logs/.migrations-done). Reconstruye sin caché; si el build falla, el contenedor anterior sigue en pie.</p></div>
-        <span class="sep" aria-hidden="true">→</span>
-        <div class="card paso"><span class="mono et2">si algo sale mal</span><h3>rollback</h3><p>Vuelve a la versión anotada antes del upgrade y reconstruye. Luego clean borra solo las imágenes con la etiqueta del proyecto.</p></div>
+      <div class="term mini rv">
+        <div class="term-bar"><i></i><i></i><i></i><span class="mono">tu-pc — conectado a la tailnet</span></div>
+        <pre class="mono"><span class="dim"># entrar</span>
+<b>$</b> ssh ai@ai-workspace
+<b>$</b> mosh -p 60000:60010 ai@ai-workspace
+<span class="dim"># DBeaver o Power BI contra el Postgres local</span>
+<b>$</b> ssh -N -L 5432:127.0.0.1:5432 ai@ai-workspace</pre>
       </div>
     </section>
 
-    <section>
-      <h2>Comandos clave</h2>
-      <div class="card tabla">
-        <table>
-          <tbody>
-            {comandos.map(([c, d]) => (<tr><td class="mono cmd">./setup.sh {c}</td><td>{d}</td></tr>))}
-          </tbody>
-        </table>
-      </div>
-      <div class="card conexion">
-        <pre class="mono"><span class="cm"># desde tu PC, conectado a la tailnet</span>
-ssh ai@ai-workspace
-mosh -p 60000:60010 ai@ai-workspace
-ssh -N -L 5432:127.0.0.1:5432 ai@ai-workspace   <span class="cm"># DBeaver / Power BI</span></pre>
-      </div>
-    </section>
-
-    <footer>ai-workspace v2 · Dusakawi EPS · Basado en docker-compose.yml, Dockerfile, entrypoint.sh y setup.sh</footer>
+    <footer class="wrap pie">
+      <p class="marca display" aria-hidden="true">ai-workspace</p>
+      <p>v2 · Dusakawi EPS · Basado en docker-compose.yml, Dockerfile, entrypoint.sh y setup.sh</p>
+    </footer>
   </main>
 </Base>
 
+<script>
+  // Pestañas del ciclo de vida
+  const tabs = document.querySelectorAll<HTMLButtonElement>('[data-tab]');
+  tabs.forEach(b => b.addEventListener('click', () => {
+    tabs.forEach(x => x.setAttribute('aria-selected', String(x === b)));
+    document.querySelectorAll<HTMLElement>('[data-panel]').forEach(p => {
+      p.hidden = p.dataset.panel !== b.dataset.tab;
+      if (!p.hidden) p.querySelectorAll('li').forEach((li, i) =>
+        li.animate?.([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 400, delay: i * 40, easing: 'ease-out', fill: 'backwards' }));
+    });
+  }));
+
+  // Copiar comandos
+  document.querySelectorAll<HTMLButtonElement>('[data-copiar]').forEach(b => b.addEventListener('click', async () => {
+    const em = b.querySelector('em')!;
+    try { await navigator.clipboard.writeText(b.dataset.copiar!); em.textContent = 'copiado ✓'; }
+    catch { em.textContent = 'no se pudo'; }
+    setTimeout(() => (em.textContent = 'copiar'), 1500);
+  }));
+</script>
+
 <style>
-  .intro { padding: 4rem 0 1rem; }
-  .eyebrow { margin: 0; color: var(--accent); font-size: .85rem; font-weight: 500; }
-  h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); line-height: 1.15; letter-spacing: -.03em; margin: .5rem 0 1rem; max-width: 760px; }
-  .lead { color: var(--muted); font-size: 1.02rem; max-width: 700px; margin: 0; }
-  .lead strong, .nota strong { color: var(--fg); font-weight: 600; }
-  .claves { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin-top: 2rem; }
-  .claves div { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: .9rem 1rem; display: grid; gap: .1rem; }
-  .claves strong { font-size: 1.6rem; font-weight: 500; color: var(--accent); }
-  .claves span { color: var(--muted); font-size: .82rem; }
+  /* Fondo: rejilla + orbes de luz */
+  .fondo { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+  .rejilla { position: absolute; inset: 0;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 56px 56px; mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%); }
+  .orbe { position: absolute; border-radius: 50%; filter: blur(80px); }
+  .o1 { width: 520px; height: 520px; top: -180px; left: 8%; background: var(--glow); animation: flotar 18s ease-in-out infinite; }
+  .o2 { width: 460px; height: 460px; top: -120px; right: 4%; background: var(--glow-2); animation: flotar 22s ease-in-out infinite reverse; }
+  @keyframes flotar { 50% { transform: translate(40px, 30px) scale(1.08); } }
 
-  section { margin-top: 3.5rem; }
-  h2 { font-size: 1.15rem; letter-spacing: -.015em; margin: 0 0 1rem; }
-  h3 { font-size: .95rem; margin: 0 0 .3rem; font-weight: 600; }
-  h4 { font-size: .9rem; margin: 0 0 .2rem; font-weight: 600; }
+  /* Hero */
+  .hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; padding-top: 9rem; padding-bottom: 3rem; }
+  @media (max-width: 920px) { .hero { grid-template-columns: 1fr; gap: 2.5rem; padding-top: 7.5rem; } }
+  .pill { display: inline-flex; align-items: center; gap: .55rem; font-size: .8rem; color: var(--muted); text-decoration: none;
+          border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 70%, transparent); padding: .32rem .8rem; border-radius: 99px; }
+  .pill:hover { color: var(--fg); }
+  .live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 var(--accent); animation: latido 2s infinite; }
+  @keyframes latido { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  h1 { font-size: clamp(2.5rem, 6.4vw, 4.4rem); line-height: 1.02; letter-spacing: -.045em; font-weight: 700; margin: 1.3rem 0 1.2rem; }
+  .grad { background: linear-gradient(100deg, var(--accent) 10%, var(--accent-2) 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--muted); font-size: 1.07rem; max-width: 540px; margin: 0; }
+  .lead strong { color: var(--fg); font-weight: 600; }
+  .cta { display: flex; gap: .7rem; flex-wrap: wrap; margin-top: 2rem; }
+  .btn { display: inline-flex; align-items: center; gap: .45rem; text-decoration: none; padding: .7rem 1.15rem; border-radius: 11px;
+         font-weight: 500; font-size: .9rem; border: 1px solid var(--border); background: var(--surface); transition: transform .15s, border-color .15s; }
+  .btn:hover { transform: translateY(-1px); border-color: var(--subtle); }
+  .btn svg { width: 16px; height: 16px; }
+  .primario { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+  /* Terminal */
+  .term { border-radius: 16px; overflow: hidden; background: var(--term-bg); color: var(--term-fg); border: 1px solid #ffffff14;
+          box-shadow: 0 30px 80px -20px rgb(0 0 0 / .45), 0 0 0 1px rgb(0 0 0 / .2); }
+  .hero .term { transform: perspective(1400px) rotateY(-6deg) rotateX(2deg); transition: transform .6s; }
+  .hero .term:hover { transform: none; }
+  @media (max-width: 920px) { .hero .term { transform: none; } }
+  .term-bar { display: flex; align-items: center; gap: 6px; padding: .7rem .9rem; border-bottom: 1px solid #ffffff10; background: #ffffff06; }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #ffffff1f; }
+  .term-bar i:first-child { background: #ff5f57; } .term-bar i:nth-child(2) { background: #febc2e; } .term-bar i:nth-child(3) { background: #28c840; }
+  .term-bar span { margin-left: auto; margin-right: auto; font-size: .72rem; color: #8c9a92; transform: translateX(-18px); }
+  pre { margin: 0; padding: 1.1rem 1.2rem 1.3rem; font-size: .78rem; line-height: 1.75; overflow-x: auto; white-space: pre; }
+  pre b { color: #3ee6a4; font-weight: 500; }
+  .ln { display: inline; opacity: 0; animation: aparecer .01s forwards; animation-delay: calc(var(--i) * 420ms + 300ms); }
+  .ln.info { color: #9aa8a0; } .ln.ok { color: #3ee6a4; } .ln.dim, pre .dim { color: #7d8b84; }
+  @keyframes aparecer { to { opacity: 1; } }
+  .cursor { color: #3ee6a4; opacity: 0; animation: aparecer .01s forwards, parpadeo 1s steps(1) infinite;
+            animation-delay: calc(var(--i) * 420ms + 300ms), calc(var(--i) * 420ms + 300ms); }
+  @keyframes parpadeo { 50% { opacity: 0; } }
+  .mini { margin-top: 1rem; }
+  .entra { animation: subir .9s .15s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes subir { from { opacity: 0; translate: 0 24px; } }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--border); border-radius: 18px;
+           background: color-mix(in srgb, var(--surface) 80%, transparent); backdrop-filter: blur(6px); padding: 0; overflow: hidden; }
+  .stats div { padding: 1.4rem 1.5rem; border-right: 1px solid var(--border); display: grid; gap: .2rem; }
+  .stats div:last-child { border-right: 0; }
+  .stats strong { font-size: 2.6rem; line-height: 1; font-weight: 600; letter-spacing: -.04em;
+                  background: linear-gradient(180deg, var(--fg), var(--muted)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stats span { color: var(--muted); font-size: .84rem; }
+  @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; } .stats div:nth-child(2) { border-right: 0; } .stats div:nth-child(-n+2) { border-bottom: 1px solid var(--border); } }
+  .wrap.stats { max-width: 1048px; margin: 0 auto; }
+  @media (max-width: 1080px) { .wrap.stats { margin: 0 16px; } }
+
+  /* Encabezados de sección */
+  .bloque { margin-top: 7rem; }
+  .cab { display: grid; grid-template-columns: auto 1fr; column-gap: 1rem; margin-bottom: 2rem; max-width: 760px; }
+  .num { grid-row: span 2; color: var(--accent); font-size: .8rem; padding-top: .55rem; }
+  .cab h2 { margin: 0; font-size: clamp(1.6rem, 3.6vw, 2.3rem); letter-spacing: -.035em; line-height: 1.1; }
+  .cab p { margin: .6rem 0 0; color: var(--muted); }
+  h3 { margin: 0; font-size: 1rem; letter-spacing: -.01em; font-weight: 600; }
   p { margin: 0; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
-  .nota { color: var(--muted); font-size: .9rem; margin-top: 1rem; max-width: 720px; }
-  .nota.sub { margin: -.5rem 0 1.25rem; }
+  .nota { color: var(--muted); font-size: .9rem; margin-top: 1.25rem; max-width: 720px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
 
-  .diagrama { padding: 1rem; overflow-x: auto; }
-  svg { display: block; width: 100%; min-width: 640px; height: auto; font-family: Inter, system-ui, sans-serif; }
-  .caja { fill: none; stroke: var(--border); stroke-width: 1.2; }
-  .ns { stroke-dasharray: 4 4; stroke: var(--subtle); }
-  .nodo { fill: var(--surface); stroke: var(--border); stroke-width: 1.2; }
-  .opc { stroke-dasharray: 4 4; stroke: var(--subtle); }
-  .bloq { stroke: var(--danger); stroke-dasharray: 4 4; }
-  .app { fill: var(--accent-soft); stroke: var(--accent); }
-  .vol { fill: var(--hover); stroke: var(--border); }
-  .t { fill: var(--fg); font-size: 13px; font-weight: 600; text-anchor: middle; }
-  .s { fill: var(--muted); font-size: 11px; text-anchor: middle; }
-  .m { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
-  .et { fill: var(--subtle); font-size: 10px; letter-spacing: .08em; font-weight: 500; }
-  .ac { fill: var(--accent); } .dn { fill: var(--danger); }
-  .punta { fill: var(--accent); }
-  .linea { stroke: var(--subtle); stroke-width: 1.2; stroke-dasharray: 3 3; fill: none; }
-  .flujo { stroke: var(--accent); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; animation: fluir 1.2s linear infinite; }
-  .corte { stroke: var(--danger); stroke-width: 1.2; fill: none; stroke-dasharray: 3 4; }
-  @keyframes fluir { to { stroke-dashoffset: -9; } }
-  @media (prefers-reduced-motion: reduce) { .flujo { animation: none; } }
+  /* Tabs + pasos */
+  .tabs { display: inline-flex; gap: .3rem; padding: .3rem; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .tabs button { display: flex; align-items: center; gap: .6rem; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+                 padding: .5rem .85rem; border-radius: 9px; font: 500 .85rem Inter, sans-serif; }
+  .tabs button code { background: none; border: 0; padding: 0; }
+  .tabs button span { font-size: .72rem; color: var(--subtle); }
+  .tabs button[aria-selected="true"] { background: var(--hover); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border); }
+  .pasos { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .75rem; }
+  .pasos[hidden] { display: none; }
+  .pasos li { position: relative; padding: 1.2rem 1.2rem 1.25rem; border: 1px solid var(--border); border-radius: 16px; background: var(--surface);
+              transition-delay: var(--d, 0ms); overflow: hidden; }
+  .pasos li::after { content: ''; position: absolute; inset: auto 0 0 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+                     transform: scaleX(0); transform-origin: left; transition: transform .4s; }
+  .pasos li:hover::after { transform: scaleX(1); }
+  .pasos .n { display: block; font-size: 2rem; font-weight: 600; line-height: 1; margin-bottom: .9rem; letter-spacing: -.04em;
+              color: transparent; -webkit-text-stroke: 1px var(--subtle); }
+  .pasos li:hover .n { -webkit-text-stroke-color: var(--accent); }
+  .pasos p { color: var(--muted); font-size: .87rem; margin-top: .35rem; }
 
-  .contenedores { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem; margin-top: .75rem; }
-  .contenedores .card { padding: 1.1rem 1.2rem; }
-  .contenedores h3 { margin: .6rem 0 .3rem; font-size: .88rem; }
-  .contenedores p { color: var(--muted); font-size: .87rem; }
+  /* Pila de capas */
+  .pila { display: grid; gap: .5rem; perspective: 1200px; }
+  .capa { display: grid; grid-template-columns: 170px 220px 1fr; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-radius: 14px;
+          border: 1px solid var(--border); background: var(--surface); margin-inline: calc((5 - var(--i)) * 10px);
+          transition: transform .4s, border-color .25s, opacity .7s; transition-delay: calc(var(--i) * 60ms); }
+  .capa:hover { transform: translateX(6px); border-color: var(--accent); }
+  .capa.usuario { border-style: dashed; border-color: var(--accent); background: linear-gradient(90deg, var(--accent-soft), var(--surface) 70%); margin-bottom: .6rem; }
+  .capa .k { font-size: .7rem; color: var(--subtle); text-transform: uppercase; letter-spacing: .06em; }
+  .capa.usuario .k { color: var(--accent); }
+  .capa p { color: var(--muted); font-size: .87rem; }
+  @media (max-width: 760px) { .capa { grid-template-columns: 1fr; gap: .25rem; margin-inline: 0; } }
 
-  .dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem; }
-  .col { margin-bottom: 1rem; font-weight: 500; color: var(--muted); }
-  .pasos { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--border); margin-left: .85rem; }
-  .pasos li { display: flex; gap: 1rem; padding: 0 0 1.2rem 0; }
-  .pasos li:last-child { padding-bottom: 0; }
-  .n { flex: none; width: 1.75rem; height: 1.75rem; margin-left: -.88rem; display: grid; place-items: center; border-radius: 50%;
-       background: var(--surface); border: 1px solid var(--border); font-size: .75rem; color: var(--muted); }
-  .pasos p { color: var(--muted); font-size: .88rem; }
+  /* Bento */
+  .bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; }
+  .bento .card { padding: 1.3rem; transition: border-color .2s, transform .5s, opacity .7s; transition-delay: var(--d, 0ms); }
+  .bento .card:hover { border-color: var(--subtle); transform: translateY(-2px); }
+  .bento p { color: var(--muted); font-size: .86rem; margin-top: .4rem; }
+  .ic { width: 26px; height: 26px; color: var(--accent); margin-bottom: .9rem; }
+  .grande { grid-column: span 2; grid-row: span 2; display: flex; flex-direction: column; justify-content: flex-end; min-height: 280px;
+            background: radial-gradient(circle at 70% 35%, var(--glow), transparent 60%), var(--surface); position: relative; overflow: hidden; }
+  .grande h3 { font-size: 1.5rem; letter-spacing: -.03em; }
+  .grande p { font-size: .93rem; max-width: 420px; }
+  .radar { position: absolute; top: 36%; left: 70%; translate: -50% -50%; width: 10px; height: 10px; }
+  .radar b { position: absolute; inset: 0; border-radius: 50%; background: var(--accent); box-shadow: 0 0 20px var(--accent); }
+  .radar span { position: absolute; inset: -6px; border-radius: 50%; border: 1px solid var(--accent); opacity: 0; animation: onda 3.6s ease-out infinite; }
+  .radar span:nth-child(2) { animation-delay: 1.2s; } .radar span:nth-child(3) { animation-delay: 2.4s; }
+  @keyframes onda { 0% { transform: scale(.4); opacity: .8; } 100% { transform: scale(16); opacity: 0; } }
+  @media (max-width: 900px) { .bento { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { .bento { grid-template-columns: 1fr; } .grande { grid-column: auto; } }
 
-  .capas { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: .75rem; }
-  .capas .card { padding: 1.1rem 1.2rem; transition: border-color .15s; }
-  .capas .card:hover { border-color: var(--subtle); }
-  .capas p { color: var(--muted); font-size: .87rem; }
+  /* Volúmenes */
+  .vols { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .75rem; }
+  .vol { padding: 1.1rem 1.15rem; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); display: grid; gap: .5rem; align-content: start; }
+  .vol-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+  .vol-top .mono { font-size: .8rem; font-weight: 500; }
+  .vol p { color: var(--muted); font-size: .85rem; }
+  .vol .si { font-size: .8rem; padding-top: .55rem; border-top: 1px solid var(--border); }
+  .vol .si span { color: var(--subtle); }
+  .riesgo { display: flex; gap: 3px; }
+  .riesgo i { width: 14px; height: 4px; border-radius: 2px; background: var(--border); }
+  .riesgo i.on.n1 { background: var(--subtle); } .riesgo i.on.n2 { background: var(--warn); } .riesgo i.on.n3 { background: var(--danger); }
 
-  .tabla { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 560px; }
-  th { text-align: left; font-weight: 500; color: var(--muted); font-size: .8rem; }
-  th, td { padding: .75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-  tbody tr:last-child td { border-bottom: 0; }
-  tbody tr:hover { background: var(--hover); }
-  td.mono { font-size: .8rem; white-space: nowrap; }
-  td.cmd { color: var(--accent); }
-  .chip { display: inline-block; font-size: .75rem; padding: .15rem .55rem; border-radius: 99px; font-weight: 500; }
-  .chip.app { background: var(--accent-soft); color: var(--accent); }
-  .chip.vpn { background: var(--hover); color: var(--fg); border: 1px solid var(--border); }
-  .chip.local, .chip.muted { color: var(--muted); border: 1px solid var(--border); }
-  .chip.warn { background: var(--warn-soft); color: var(--warn); }
-  .chip.danger { background: var(--danger-soft); color: var(--danger); }
-
-  .flujo-op { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; gap: .5rem; align-items: stretch; }
-  .paso { padding: 1rem 1.05rem; }
-  .paso p { color: var(--muted); font-size: .84rem; }
-  .et2 { font-size: .7rem; color: var(--subtle); text-transform: uppercase; letter-spacing: .06em; }
-  .paso h3 { margin-top: .3rem; }
-  .sep { align-self: center; color: var(--subtle); }
+  /* Pipeline */
+  .pipe { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; position: relative; }
+  .pipe::before { content: ''; position: absolute; top: 7px; left: 7px; right: 7px; height: 2px;
+                  background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent)); background-size: 200% 100%; animation: correr 4s linear infinite; opacity: .6; }
+  @keyframes correr { to { background-position: -200% 0; } }
+  .pipe li { position: relative; padding-top: 2rem; transition-delay: var(--d, 0ms); }
+  .punto { position: absolute; top: 0; left: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); }
+  .pipe li:last-child .punto { border-color: var(--accent-2); }
+  .pipe .e { font-size: .7rem; color: var(--subtle); text-transform: uppercase; letter-spacing: .06em; }
+  .pipe h3 { margin-top: .2rem; font-size: 1.15rem; }
+  .pipe p { color: var(--muted); font-size: .86rem; margin-top: .35rem; }
   @media (max-width: 860px) {
-    .flujo-op { grid-template-columns: 1fr; }
-    .sep { transform: rotate(90deg); justify-self: center; }
+    .pipe { grid-template-columns: 1fr; gap: 1.5rem; padding-left: 2rem; }
+    .pipe::before { top: 7px; bottom: 7px; left: 7px; right: auto; width: 2px; height: auto; background: linear-gradient(180deg, var(--accent), var(--accent-2)); animation: none; }
+    .pipe li { padding-top: 0; }
+    .punto { left: -2rem; }
   }
 
-  .conexion { margin-top: .75rem; overflow-x: auto; }
-  pre { margin: 0; padding: 1rem 1.2rem; font-size: .82rem; line-height: 1.7; }
-  .cm { color: var(--subtle); }
-  footer { padding: 4rem 0 2.5rem; color: var(--subtle); font-size: .8rem; }
+  /* Comandos */
+  .cmds { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .5rem; }
+  .cmd { position: relative; text-align: left; display: grid; gap: .25rem; padding: .9rem 1rem; border: 1px solid var(--border); border-radius: 13px;
+         background: var(--surface); color: var(--fg); cursor: pointer; font: inherit; transition: border-color .15s, opacity .7s, transform .7s; }
+  .cmd:hover { border-color: var(--accent); }
+  .cmd code { background: none; border: 0; padding: 0; color: var(--accent); font-size: .82rem; }
+  .cmd span { color: var(--muted); font-size: .82rem; }
+  .cmd em { position: absolute; top: .8rem; right: .9rem; font-style: normal; font-size: .68rem; color: var(--subtle); opacity: 0; transition: opacity .15s; }
+  .cmd:hover em, .cmd:focus-visible em { opacity: 1; }
+
+  /* Pie */
+  .pie { margin-top: 8rem; padding-bottom: 2.5rem; color: var(--subtle); font-size: .8rem; overflow: hidden; }
+  .marca { margin: 0 0 1rem; font-size: clamp(3rem, 14vw, 10rem); font-weight: 700; letter-spacing: -.06em; line-height: .9; white-space: nowrap;
+           background: linear-gradient(180deg, var(--border), transparent); -webkit-background-clip: text; background-clip: text; color: transparent; }
 </style>
