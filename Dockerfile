@@ -12,8 +12,16 @@ ARG USER_GID=1000
 # Node: deja NODE_VERSION vacío para tomar la última del major, o fíjala (ej. 24.11.1)
 ARG NODE_MAJOR=24
 ARG NODE_VERSION=""
-ARG NPM_GLOBAL_PACKAGES="@anthropic-ai/claude-code @mariozechner/pi-coding-agent playwright @playwright/cli @playwright/mcp"
+# --- Componentes (se eligen con "./setup.sh components"; true/false) ---
+ARG INSTALL_CLAUDE=true
+ARG INSTALL_PI=true
+ARG INSTALL_OPENCODE=false
+ARG INSTALL_PLAYWRIGHT=true
 ARG INSTALL_PLAYWRIGHT_BROWSERS=true
+ARG INSTALL_GENTLE_AI=true
+ARG INSTALL_AGY=true
+# CLIs npm adicionales para todo el equipo (separadas por espacio)
+ARG NPM_EXTRA_PACKAGES=""
 # PostgreSQL dentro del workspace (servidor + cliente) y extensiones (postgresql-<major>-<ext>)
 ARG PG_MAJOR=17
 # false = la BD se instala bajo demanda con "devdb install" (sin root)
@@ -111,8 +119,17 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
 # ---------------------------------------------------------------------------
 # 4. CLIs globales de npm horneadas en la imagen (/usr/local)
 # ---------------------------------------------------------------------------
-RUN npm install -g --omit=dev --no-fund --no-audit ${NPM_GLOBAL_PACKAGES} \
- && npm cache clean --force
+RUN pkgs=() \
+ && if [[ "${INSTALL_CLAUDE}" == "true" ]];     then pkgs+=(@anthropic-ai/claude-code); fi \
+ && if [[ "${INSTALL_PI}" == "true" ]];         then pkgs+=(@mariozechner/pi-coding-agent); fi \
+ && if [[ "${INSTALL_OPENCODE}" == "true" ]];   then pkgs+=(opencode-ai); fi \
+ && if [[ "${INSTALL_PLAYWRIGHT}" == "true" ]]; then pkgs+=(playwright @playwright/cli @playwright/mcp); fi \
+ && read -ra extra <<< "${NPM_EXTRA_PACKAGES}" && pkgs+=("${extra[@]}") \
+ && if (( ${#pkgs[@]} )); then \
+      echo "npm global: ${pkgs[*]}" \
+   && npm install -g --omit=dev --no-fund --no-audit "${pkgs[@]}" \
+   && npm cache clean --force; \
+    fi
 
 # ---------------------------------------------------------------------------
 # 5. Chromium de Playwright + sus librerías (reemplaza la lista manual de libs)
@@ -122,7 +139,7 @@ RUN npm install -g --omit=dev --no-fund --no-audit ${NPM_GLOBAL_PACKAGES} \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    if [[ "${INSTALL_PLAYWRIGHT_BROWSERS}" == "true" ]]; then \
+    if [[ "${INSTALL_PLAYWRIGHT}" == "true" && "${INSTALL_PLAYWRIGHT_BROWSERS}" == "true" ]]; then \
       playwright install --with-deps chromium \
    && find /usr/local/lib/node_modules -path '*/playwright-core/cli.js' -print0 \
       | xargs -0 -r -I{} node {} install chromium; \
@@ -136,6 +153,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN if [[ "${INSTALL_HERDR}" == "true" ]]; then \
       curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh \
    && ls -l /usr/local/bin/herdr*; \
+    fi
+
+# ---------------------------------------------------------------------------
+# 6a. Gentle AI (instalador oficial, binario de GitHub Releases con checksum)
+#     y Antigravity CLI "agy" (instalador oficial; instala en ~/.local/bin, se mueve
+#     a /usr/local/bin para que no lo oculte el volumen ai_home)
+# ---------------------------------------------------------------------------
+RUN if [[ "${INSTALL_GENTLE_AI}" == "true" ]]; then \
+      curl -fsSL https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/scripts/install.sh \
+        | bash -s -- --method binary --dir /usr/local/bin \
+   && /usr/local/bin/gentle-ai --version; \
+    fi
+RUN if [[ "${INSTALL_AGY}" == "true" ]]; then \
+      tmp_home="$(mktemp -d)" \
+   && curl -fsSL https://antigravity.google/cli/install.sh | HOME="$tmp_home" bash \
+   && install -m 755 "$tmp_home/.local/bin/agy" /usr/local/bin/agy \
+   && rm -rf "$tmp_home" \
+   && ls -l /usr/local/bin/agy; \
     fi
 
 # ---------------------------------------------------------------------------

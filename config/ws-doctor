@@ -11,17 +11,20 @@ check() {
   if out="$("$@" 2>/dev/null | head -n1)"; then ok "$name" "$out ($(command -v "$1"))"; else fail "$name" "no disponible"; fi
 }
 
-echo "Herramientas:"
+# Componente opcional: si no está, se informa sin marcar error
+present() {   # solo verifica que exista (para CLIs sin --version estable)
+  if command -v "$2" >/dev/null; then ok "$1" "$(command -v "$2")"
+  else printf '  - %-14s no incluido (./setup.sh components)\n' "$1"; fi
+}
+opt() {
+  local name="$1"; shift
+  if command -v "$1" >/dev/null; then check "$name" "$@"
+  else printf '  - %-14s no incluido (./setup.sh components)\n' "$name"; fi
+}
+
+echo "Herramientas base:"
 check node    node --version
 check npm     npm --version
-check claude  claude --version
-check pi      pi --version
-if command -v herdr >/dev/null; then ok herdr "$(command -v herdr)"; else echo "  - herdr          no incluido (INSTALL_HERDR=false)"; fi
-if command -v doppler >/dev/null; then check doppler doppler --version; fi
-if command -v opencode >/dev/null; then check opencode opencode --version; fi
-check pw      playwright --version
-check pw-cli  playwright-cli --version
-check pw-mcp  playwright-mcp --version
 check uv      uv --version
 check mise    mise --version
 check python3 python3 --version
@@ -31,9 +34,21 @@ check psql    psql --version
 check sqlite3 sqlite3 --version
 check redis   redis-cli --version
 check devdb   devdb help
-if command -v sqlcmd >/dev/null; then check sqlcmd sqlcmd -?; fi
 check rg      rg --version
 check fd      fd --version
+
+echo "Componentes:"
+opt claude    claude --version
+opt pi        pi --version
+opt opencode  opencode --version
+present agy   agy
+opt gentle-ai gentle-ai --version
+present herdr herdr
+opt doppler   doppler --version
+opt pw        playwright --version
+opt pw-cli    playwright-cli --version
+opt pw-mcp    playwright-mcp --version
+opt sqlcmd    sqlcmd -?
 
 echo "Bases de datos locales (devdb):"
 devdb installed 2>/dev/null | sed 's/^/    /'
@@ -42,11 +57,13 @@ if [[ -n "${SQLCMDSERVER:-}" ]] && getent hosts "$SQLCMDSERVER" >/dev/null; then
   ok mssql "$SQLCMDSERVER (sqlcmd -C -Q 'SELECT @@VERSION')"
 fi
 
+if command -v playwright >/dev/null; then
 echo "Playwright:"
 if ls -d "${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"/chromium* >/dev/null 2>&1; then
   ok chromium "$(ls -d "${PLAYWRIGHT_BROWSERS_PATH}"/chromium* | xargs -n1 basename | tr '\n' ' ')"
 else
   fail chromium "no encontrado en ${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"
+fi
 fi
 
 echo "Escritura sin root:"

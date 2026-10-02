@@ -132,6 +132,30 @@ mosh -p 60000:60010 ai@ai-workspace
 
 > Cambio respecto a v1: SSH ahora es el puerto **22** en la IP de Tailscale, ya no el 2222.
 
+## Componentes: instala solo lo que necesitas
+
+```bash
+./setup.sh components      # o menú → 4) Elegir componentes
+```
+
+```
+  1) [x] Claude Code       agente de Anthropic (claude)
+  2) [x] Pi                agente pi-coding-agent
+  3) [ ] opencode          agente opencode (opencode-ai)
+  4) [x] Antigravity CLI   agente de Google (agy)
+  5) [x] Gentle AI         memoria y flujos para tus agentes (gentle-ai)
+  6) [x] Herdr             sesiones de agentes persistentes (herdr)
+  7) [x] Playwright        navegador para agentes + Chromium (~600 MB)
+  8) [x] Doppler CLI       gestor de secretos (doppler)
+  9) [ ] SQL Server tools  sqlcmd y bcp
+  Escribe números para marcar/desmarcar (ej: 3 7), a=todos, n=ninguno, d=por defecto, Enter=guardar
+```
+
+- **Primera instalación:** el script pregunta *"¿Instalación completa o personalizada?"*. Si eliges la personalizada, muestra este menú.
+- **Después:** cambia la selección cuando quieras. El script guarda en `.env` (`INSTALL_*=true/false`) y ofrece reconstruir. Lo que desmarcas desaparece de la imagen; tus datos no se tocan.
+- **La base siempre viene:** git, gh, Node, Python/uv, mise, clientes de bases de datos, devdb, zsh y las herramientas de terminal.
+- **CLIs npm extra para todo el equipo:** `NPM_EXTRA_PACKAGES="@openai/codex otra-cli"` en `.env`.
+
 ## Qué trae la imagen
 
 Todo esto queda instalado al construir la imagen; no hay que instalar nada a mano:
@@ -143,7 +167,7 @@ Todo esto queda instalado al construir la imagen; no hay que instalar nada a man
 | Compilación | `build-essential`, `pkg-config`, `make`, `libpq-dev` (para módulos nativos de npm y pip) |
 | Bases de datos | Clientes `psql`/`pg_dump` 17, `sqlite3`, `redis-cli`, `mariadb`/`mysql`. **Servidores bajo demanda sin root:** `devdb install postgres` y `devdb install redis`. `sqlcmd`/`bcp` opcionales |
 | Secretos | **Doppler CLI** (`doppler login`, `doppler run -- …`) |
-| Agentes / IA | Claude Code, Pi, **Herdr**, Playwright, **playwright-cli** y **playwright-mcp**, con su Chromium incluido (no hace falta Google Chrome) |
+| Agentes / IA | Claude Code, Pi, **Antigravity CLI (agy)**, **Gentle AI**, opencode (opcional), **Herdr**, Playwright, **playwright-cli** y **playwright-mcp**, con su Chromium incluido (no hace falta Google Chrome) |
 | CLI | `zsh`, `fzf`, `rg`, `fd`, `bat`, `jq`, `tree`, `htop`, `tmux`, `vim`, `nano`, `direnv`, `shellcheck`, `mosh` |
 
 ### GitHub CLI
@@ -221,8 +245,9 @@ El archivo `.env` lo crea `setup.sh` con permisos 600. La plantilla documentada 
 | `MEM_LIMIT` / `CPUS` | No | `8g` / `4` | Límites de recursos del workspace. |
 | `NODE_MAJOR` | No | `24` | Versión mayor de Node.js. |
 | `NODE_VERSION` | No | *(vacía = última del major)* | Versión exacta de Node (p. ej. `24.11.1`), para que cada build dé el mismo resultado. |
-| `NPM_GLOBAL_PACKAGES` | No | `@anthropic-ai/claude-code @mariozechner/pi-coding-agent playwright @playwright/cli @playwright/mcp` | Herramientas npm que se instalan dentro de la imagen. |
 | `INSTALL_PLAYWRIGHT_BROWSERS` | No | `true` | Incluye Chromium y sus librerías en la imagen. |
+| `INSTALL_CLAUDE` / `INSTALL_PI` / `INSTALL_OPENCODE` / `INSTALL_AGY` / `INSTALL_GENTLE_AI` / `INSTALL_PLAYWRIGHT` | No | `true` (opencode: `false`) | Componentes de la imagen. Elígelos con `./setup.sh components` |
+| `NPM_EXTRA_PACKAGES` | No | *(vacía)* | CLIs npm adicionales para todo el equipo, separadas por espacio |
 | `INSTALL_HERDR` | No | `true` | Incluye [Herdr](https://herdr.dev) en la imagen. |
 | `INSTALL_DOPPLER` | No | `true` | Incluye la CLI de Doppler. |
 | `DOPPLER_TOKEN` | No | *(vacía)* | Service token de Doppler para usar `doppler run` sin `doppler login`. |
@@ -258,6 +283,7 @@ Si cambias una variable de la imagen (`NODE_*`, `NPM_*`, `INSTALL_*`, `USER_*`),
 | `bash setup.sh uninstall --all` | **Borra todo**: proyectos, home, bases de datos, identidad SSH, el equipo en Tailscale y `.env`. Ofrece respaldo y pide escribir `BORRAR` |
 | `bash setup.sh upgrade` | **Descarga lo último de GitHub** y reconstruye (ver "Actualizar a la última versión") |
 | `bash setup.sh update` | Reconstruye la imagen sin caché, con versiones nuevas |
+| `bash setup.sh components` | Elige qué agentes y herramientas trae la imagen (y reconstruye) |
 | `bash setup.sh rollback` | Vuelve a la versión anterior al último `upgrade` y reconstruye |
 | `bash setup.sh clean [--deep]` | Limpia imágenes viejas, logs y respaldos antiguos |
 | `bash setup.sh migrate` | Aplica manualmente las migraciones pendientes |
@@ -283,7 +309,7 @@ curl -fsSL https://bun.sh/install | bash           # -> ~/.bun/bin
 curl -fsSL https://sh.rustup.rs | sh -s -- -y      # -> ~/.cargo/bin
 ```
 
-Si un instalador pide `sudo` o escribe en `/usr/local`, no va a funcionar como `ai`. En ese caso usa `mise`, `npm i -g` o `uv tool`, o agrégalo a la imagen en `config/extra-root.sh` para todo el equipo. Para tener opencode en la imagen también puedes agregar `opencode-ai` a `NPM_GLOBAL_PACKAGES`.
+Si un instalador pide `sudo` o escribe en `/usr/local`, no va a funcionar como `ai`. En ese caso usa `mise`, `npm i -g` o `uv tool`, o agrégalo a la imagen en `config/extra-root.sh` para todo el equipo. Para tener opencode en la imagen para todo el equipo, actívalo en `./setup.sh components`.
 
 ### Herdr (incluido)
 
@@ -294,6 +320,20 @@ herdr          # abre o retoma tus sesiones de agentes (Claude Code, opencode, P
 ```
 
 El instalador oficial verifica el SHA-256 y deja el binario en `/usr/local/bin`. Se actualiza con `bash setup.sh update`. Si quieres una versión más nueva solo para ti, sin root: `curl -fsSL https://herdr.dev/install.sh | sh`, que la instala en `~/.local/bin` y tiene prioridad en el `PATH`.
+
+### Gentle AI y Antigravity CLI (agy)
+
+```bash
+gentle-ai          # configurador interactivo: agentes, memoria (Engram), skills y flujos
+gentle-ai doctor   # diagnóstico, sin cambios
+
+agy                # Antigravity CLI. La primera vez muestra una URL: ábrela en tu PC,
+                   # aprueba con tu cuenta Google y pega el código (tienes ~30 s)
+```
+
+- Gentle AI escribe su configuración en tu home (`~/.claude`, configuración de opencode, etc.). Todo queda en el volumen `ai_home`.
+- **agy en un servidor sin navegador:** también puedes hacer login en tu PC y copiar `~/.gemini/antigravity-cli/antigravity-oauth-token` a la misma ruta dentro del workspace.
+- Si `agy` falla con `Illegal instruction`, el servidor (o su VM) no expone las instrucciones AES de la CPU. Hay que habilitarlas en el hipervisor, o desmarcar el componente.
 
 ### Doppler (secretos)
 
@@ -325,7 +365,7 @@ claude mcp add playwright -- playwright-mcp # registrar el servidor MCP en Claud
 |---|---|---|
 | Un paquete apt | Agregarlo a `config/packages.apt` y luego `update` | En el build |
 | Un binario externo (Herdr, etc.) | Agregarlo a `config/extra-root.sh` y luego `update` | En el build |
-| Una herramienta npm fija para todos | `NPM_GLOBAL_PACKAGES` en `.env` y luego `update` | En el build |
+| Una herramienta npm fija para todos | `NPM_EXTRA_PACKAGES` en `.env` y luego `update` | En el build |
 | Una herramienta npm puntual o una actualización | `npm i -g pkg` (queda en `~/.npm-global`) | No |
 | Una herramienta Python | `uv tool install ruff` (queda en `~/.local/bin`) | No |
 | Otra versión de Node, Python o Go | `mise use -g node@22`, o un `.mise.toml` por repositorio | No |

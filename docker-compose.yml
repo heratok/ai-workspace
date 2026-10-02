@@ -47,8 +47,15 @@ services:
         USER_GID: ${USER_GID:-1000}
         NODE_MAJOR: ${NODE_MAJOR:-24}
         NODE_VERSION: ${NODE_VERSION:-}             # vacío = última del major
-        NPM_GLOBAL_PACKAGES: ${NPM_GLOBAL_PACKAGES:-@anthropic-ai/claude-code @mariozechner/pi-coding-agent playwright @playwright/cli @playwright/mcp}
+        # Componentes: ./setup.sh components (o editar .env) y luego ./setup.sh update
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-true}
+        INSTALL_PI: ${INSTALL_PI:-true}
+        INSTALL_OPENCODE: ${INSTALL_OPENCODE:-false}
+        INSTALL_PLAYWRIGHT: ${INSTALL_PLAYWRIGHT:-true}
         INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-true}
+        INSTALL_GENTLE_AI: ${INSTALL_GENTLE_AI:-true}
+        INSTALL_AGY: ${INSTALL_AGY:-true}
+        NPM_EXTRA_PACKAGES: ${NPM_EXTRA_PACKAGES:-}
         PG_MAJOR: ${PG_MAJOR:-17}
         INSTALL_PG_SERVER: ${INSTALL_PG_SERVER:-false}
         PG_EXTENSIONS: ${PG_EXTENSIONS:-pgvector}

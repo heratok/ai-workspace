@@ -8,6 +8,7 @@
 #                                    si se cae SSH, la instalación continúa.
 #   ./setup.sh progress              Ver el progreso / resultado del último proceso
 #   ./setup.sh upgrade               Descarga lo último de GitHub (git), migra y reconstruye
+#   ./setup.sh components            Elegir qué agentes/herramientas trae la imagen
 #   ./setup.sh rollback              Vuelve a la versión anterior al último upgrade
 #   ./setup.sh clean [--deep]        Limpia imágenes viejas, logs y respaldos antiguos
 #   ./setup.sh update                Reconstruye con versiones nuevas
@@ -137,6 +138,10 @@ configure_env() {
     [[ -f "$ENV_EXAMPLE" ]] || die "Falta env.example"
     cp "$ENV_EXAMPLE" "$ENV_FILE"; chmod 600 "$ENV_FILE"
     info ".env creado desde env.example"
+    if [[ -t 0 ]]; then
+      local mode; read -rp "¿Instalación completa (recomendada) o personalizada? [C/p]: " mode || true
+      if [[ "$mode" =~ ^[pP] ]]; then choose_components || true; fi
+    fi
   fi
 
   [[ -n "$authkey" ]] && env_set TS_AUTHKEY "$authkey"
@@ -319,7 +324,7 @@ ${c_ok}Listo.${c_off} Accesible SOLO desde tu tailnet (nada publicado en el serv
 EOF
 }
 
-usage() { sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ------------------------------------------------------------ segundo plano
 # Lo interactivo (auth key, clave SSH) se pregunta ANTES; lo largo (build) corre
@@ -437,6 +442,76 @@ install_steps() {
 }
 
 update_steps() { run_migrations; build_and_up --no-cache; clean; doctor || true; }
+
+# ------------------------------------------------------------ componentes
+# Formato: VARIABLE|Nombre|Por defecto|Descripción
+COMPONENTS=(
+  "INSTALL_CLAUDE|Claude Code|true|agente de Anthropic (claude)"
+  "INSTALL_PI|Pi|true|agente pi-coding-agent"
+  "INSTALL_OPENCODE|opencode|false|agente opencode (opencode-ai)"
+  "INSTALL_AGY|Antigravity CLI|true|agente de Google (agy)"
+  "INSTALL_GENTLE_AI|Gentle AI|true|memoria y flujos para tus agentes (gentle-ai)"
+  "INSTALL_HERDR|Herdr|true|sesiones de agentes persistentes (herdr)"
+  "INSTALL_PLAYWRIGHT|Playwright|true|navegador para agentes: playwright, -cli, -mcp + Chromium (~600 MB)"
+  "INSTALL_DOPPLER|Doppler CLI|true|gestor de secretos (doppler)"
+  "INSTALL_MSSQL_TOOLS|SQL Server tools|false|sqlcmd y bcp (mssql-tools18)"
+)
+
+comp_value() {   # valor actual (o el defecto) de un componente
+  local var="$1" def="$2" v; v="$(env_get "$var")"
+  [[ "$v" == true || "$v" == false ]] && echo "$v" || echo "$def"
+}
+
+# Menú de selección. Devuelve 0 si se guardaron cambios.
+choose_components() {
+  local -a vars names defs descs vals
+  local i entry n="${#COMPONENTS[@]}"
+  for i in "${!COMPONENTS[@]}"; do
+    IFS='|' read -r vars[i] names[i] defs[i] descs[i] <<< "${COMPONENTS[i]}"
+    vals[i]="$(comp_value "${vars[i]}" "${defs[i]}")"
+  done
+  local orig=("${vals[@]}") input tok
+  while true; do
+    echo
+    echo "${c_ok}Componentes de la imagen${c_off} (lo base siempre viene: git, gh, Node, Python/uv, mise, psql, devdb, zsh...)"
+    for i in "${!vars[@]}"; do
+      local mark="[ ]"; [[ "${vals[i]}" == true ]] && mark="[x]"
+      printf '  %2d) %s %-17s %s\n' "$((i+1))" "$mark" "${names[i]}" "${descs[i]}"
+    done
+    echo "  Escribe números para marcar/desmarcar (ej: 3 7), a=todos, n=ninguno, d=por defecto,"
+    read -rp "  Enter=guardar, q=cancelar: " input || input=q
+    case "$input" in
+      "") break ;;
+      q|Q) info "Sin cambios."; return 1 ;;
+      a|A) for i in "${!vals[@]}"; do vals[i]=true; done ;;
+      n|N) for i in "${!vals[@]}"; do vals[i]=false; done ;;
+      d|D) for i in "${!vals[@]}"; do vals[i]="${defs[i]}"; done ;;
+      *) for tok in $input; do
+           if [[ "$tok" =~ ^[0-9]+$ ]] && (( tok >= 1 && tok <= n )); then
+             i=$((tok-1)); [[ "${vals[i]}" == true ]] && vals[i]=false || vals[i]=true
+           else warn "Opción inválida: $tok"; fi
+         done ;;
+    esac
+  done
+  local changed=false
+  for i in "${!vars[@]}"; do
+    env_set "${vars[i]}" "${vals[i]}"
+    [[ "${vals[i]}" != "${orig[i]}" ]] && changed=true
+  done
+  info "Componentes guardados en .env"
+  [[ "$changed" == true ]]
+}
+
+components_cmd() {
+  [[ -f "$ENV_FILE" ]] || { cp "$ENV_EXAMPLE" "$ENV_FILE"; chmod 600 "$ENV_FILE"; }
+  if choose_components; then
+    if docker image inspect ai-workspace:latest >/dev/null 2>&1; then
+      confirm "¿Reconstruir ahora para aplicar los cambios?" && exec bash "$SCRIPT_DIR/setup.sh" update
+      info "Aplícalos cuando quieras con: ./setup.sh update"
+    fi
+  fi
+  return 0
+}
 
 # ------------------------------------------------------------ migraciones
 # migrations/NNN-descripcion.sh: cada una corre UNA vez por servidor, en orden.
@@ -657,12 +732,13 @@ menu() {
   1) Instalar / reinstalar
   2) Actualizar a la última versión (GitHub) y reconstruir
   3) Ver progreso de la instalación (o el resultado de la última)
-  4) Estado y diagnóstico
-  5) Agregar clave SSH
-  6) Respaldar datos (home + proyectos)
-  7) Limpiar (imágenes viejas, logs y respaldos antiguos)
-  8) Desinstalar (conserva datos)
-  9) Desinstalar TODO (borra datos)
+  4) Elegir componentes (qué agentes y herramientas se instalan)
+  5) Estado y diagnóstico
+  6) Agregar clave SSH
+  7) Respaldar datos (home + proyectos)
+  8) Limpiar (imágenes viejas, logs y respaldos antiguos)
+  9) Desinstalar (conserva datos)
+ 10) Desinstalar TODO (borra datos)
   0) Salir
 EOF
   local opt def=""; [[ "$running" == true ]] && def=3
@@ -672,12 +748,13 @@ EOF
     1) main install ;;
     2) main upgrade ;;
     3) main progress ;;
-    4) compose ps; doctor || true ;;
-    5) main add-key ;;
-    6) main backup ;;
-    7) main clean ;;
-    8) main uninstall ;;
-    9) main uninstall --all ;;
+    4) main components ;;
+    5) compose ps; doctor || true ;;
+    6) main add-key ;;
+    7) main backup ;;
+    8) main clean ;;
+    9) main uninstall ;;
+    10) main uninstall --all ;;
     *) info "Nada que hacer." ;;
   esac
 }
@@ -717,6 +794,7 @@ main() {
     upgrade|self-update) check_prereqs; upgrade ;;
     rollback)  check_prereqs; rollback ;;
     clean)     check_prereqs; clean "$@" ;;
+    components) components_cmd ;;
     migrate)   run_migrations ;;
     __bg)      bg_entry "$@" ;;
     add-key)   add_key "${1:-}" ;;

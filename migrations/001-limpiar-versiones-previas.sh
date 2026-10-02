@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Limpia restos de versiones anteriores de ai-workspace (idempotente, no borra datos).
 
 # Variables del .env que ya no se usan

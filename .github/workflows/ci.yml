@@ -42,7 +42,7 @@ jobs:
         run: |
           docker run --rm --entrypoint zsh ai-workspace:ci -lc '
             set -e
-            for c in node npm claude git gh psql uv mise playwright playwright-cli devdb ws-doctor; do
+            for c in node npm git gh psql uv mise devdb ws-doctor claude pi playwright playwright-cli playwright-mcp herdr doppler gentle-ai agy; do
               command -v "$c" >/dev/null || { echo "FALTA: $c"; exit 1; }
               echo "ok $c"
             done'
