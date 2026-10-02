@@ -52,7 +52,7 @@ fi
 RUNTIME_ENV=/etc/ai-workspace/runtime.env
 {
   echo "# Generado por entrypoint.sh en cada arranque. No editar."
-  for var in SQLCMDSERVER SQLCMDUSER SQLCMDPASSWORD; do
+  for var in SQLCMDSERVER SQLCMDUSER SQLCMDPASSWORD DOPPLER_TOKEN; do
     if [[ -n "${!var:-}" ]]; then printf 'export %s=%q\n' "$var" "${!var}"; fi
   done
 } > "$RUNTIME_ENV"

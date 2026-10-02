@@ -22,6 +22,8 @@ ARG PG_EXTENSIONS="pgvector"
 ARG INSTALL_MSSQL_TOOLS=false
 # Herdr (runtime persistente para agentes, https://herdr.dev)
 ARG INSTALL_HERDR=true
+# Doppler CLI (gestor de secretos, https://docs.doppler.com)
+ARG INSTALL_DOPPLER=true
 
 SHELL ["/bin/bash", "-Eeuo", "pipefail", "-c"]
 
@@ -53,6 +55,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
  && echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list \
  && pkgs=(gh "postgresql-client-${PG_MAJOR}" libpq-dev) \
+ && if [[ "${INSTALL_DOPPLER}" == "true" ]]; then \
+      curl -fsSL --retry 3 'https://packages.doppler.com/public/cli/gpg.DE2A7741A397C129.key' \
+        | gpg --dearmor -o /etc/apt/keyrings/doppler.gpg \
+   && echo "deb [signed-by=/etc/apt/keyrings/doppler.gpg] https://packages.doppler.com/public/cli/deb/debian any-version main" \
+        > /etc/apt/sources.list.d/doppler-cli.list \
+   && pkgs+=(doppler); \
+    fi \
  && if [[ "${INSTALL_PG_SERVER}" == "true" ]]; then \
       install -d /etc/postgresql-common \
    && echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf \

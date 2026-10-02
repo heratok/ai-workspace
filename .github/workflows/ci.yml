@@ -1,0 +1,48 @@
+# Verifica cada push/PR ANTES de que los servidores hagan "./setup.sh upgrade":
+# sintaxis de scripts, compose válido y que la imagen construya de verdad.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxis bash
+        run: |
+          for f in setup.sh entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh migrations/*.sh; do
+            bash -n "$f" && echo "ok $f"
+          done
+          sh -n config/env.sh
+      - name: ShellCheck (solo errores)
+        run: shellcheck -S error setup.sh entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh
+      - name: docker compose config
+        run: |
+          cp env.example .env
+          sed -i 's/external: true/external: false/' docker-compose.yml
+          docker compose config -q
+
+  build:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir imagen
+        run: docker build --progress=plain -t ai-workspace:ci .
+      - name: Verificar herramientas dentro de la imagen
+        run: |
+          docker run --rm --entrypoint zsh ai-workspace:ci -lc '
+            set -e
+            for c in node npm claude git gh psql uv mise playwright playwright-cli devdb ws-doctor; do
+              command -v "$c" >/dev/null || { echo "FALTA: $c"; exit 1; }
+              echo "ok $c"
+            done'

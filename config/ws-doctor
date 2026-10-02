@@ -17,6 +17,7 @@ check npm     npm --version
 check claude  claude --version
 check pi      pi --version
 if command -v herdr >/dev/null; then ok herdr "$(command -v herdr)"; else echo "  - herdr          no incluido (INSTALL_HERDR=false)"; fi
+if command -v doppler >/dev/null; then check doppler doppler --version; fi
 if command -v opencode >/dev/null; then check opencode opencode --version; fi
 check pw      playwright --version
 check pw-cli  playwright-cli --version

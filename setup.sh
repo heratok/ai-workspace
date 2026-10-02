@@ -8,6 +8,7 @@
 #                                    si se cae SSH, la instalación continúa.
 #   ./setup.sh progress              Ver el progreso / resultado del último proceso
 #   ./setup.sh upgrade               Descarga lo último de GitHub (git), migra y reconstruye
+#   ./setup.sh rollback              Vuelve a la versión anterior al último upgrade
 #   ./setup.sh clean [--deep]        Limpia imágenes viejas, logs y respaldos antiguos
 #   ./setup.sh update                Reconstruye con versiones nuevas
 #   ./setup.sh add-key [RUTA.pub | 'ssh-ed25519 AAAA...' | github:usuario]
@@ -318,7 +319,7 @@ ${c_ok}Listo.${c_off} Accesible SOLO desde tu tailnet (nada publicado en el serv
 EOF
 }
 
-usage() { sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ------------------------------------------------------------ segundo plano
 # Lo interactivo (auth key, clave SSH) se pregunta ANTES; lo largo (build) corre
@@ -534,6 +535,7 @@ EOF
       g stash push -q -m "setup.sh upgrade $(date +%F_%T)"
       info "Tus cambios quedaron guardados: git stash list  (recupéralos con: git stash pop)"
     fi
+    install -d -m 700 "$LOG_DIR"; g rev-parse HEAD > "$LOG_DIR/.prev-version"   # para rollback
     g merge -q --ff-only "origin/$REPO_BRANCH" || die "No se pudo actualizar sin conflictos (git status)."
     info "Archivos actualizados a: $(g log -1 --format='%h %s')"
   fi
@@ -556,6 +558,16 @@ EOF
     exec bash "$SCRIPT_DIR/setup.sh" update   # proceso nuevo: usa el setup.sh recién descargado
   fi
   info "Cuando quieras aplicarlos: ./setup.sh update"
+}
+
+rollback() {
+  [[ -d "$SCRIPT_DIR/.git" && -s "$LOG_DIR/.prev-version" ]] || die "No hay una versión anterior registrada (solo existe tras un upgrade)."
+  local prev; prev="$(cat "$LOG_DIR/.prev-version")"
+  echo "Volver de $(g log -1 --format='%h %s') a $(g log -1 --format='%h %s' "$prev")"
+  confirm "¿Continuar? (luego se reconstruye la imagen)" || { info "Cancelado."; return 0; }
+  g reset -q --hard "$prev"
+  info "Archivos de vuelta en $(g log -1 --format='%h %s'). Para volver a lo último: ./setup.sh upgrade"
+  exec bash "$SCRIPT_DIR/setup.sh" update
 }
 
 # ------------------------------------------------------------ respaldo / desinstalación
@@ -703,6 +715,7 @@ main() {
       if [[ "${1:-}" == --foreground ]]; then update_steps; else run_bg update update_steps; fi ;;
     progress)  follow ;;
     upgrade|self-update) check_prereqs; upgrade ;;
+    rollback)  check_prereqs; rollback ;;
     clean)     check_prereqs; clean "$@" ;;
     migrate)   run_migrations ;;
     __bg)      bg_entry "$@" ;;

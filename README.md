@@ -90,6 +90,14 @@ Puedes ejecutarlo de nuevo cuando quieras: los datos se conservan.
 
 Otro repo o rama: `AIWS_REPO_URL=https://github.com/otro/fork.git AIWS_REPO_BRANCH=dev ./setup.sh upgrade`.
 
+### Si una actualización sale mal
+
+```bash
+./setup.sh rollback       # vuelve a la versión que tenías antes del último upgrade y reconstruye
+```
+
+Si el build falla, el contenedor anterior **sigue funcionando**: solo se reemplaza cuando la imagen nueva se construye bien. Además, cada push a GitHub pasa por la verificación automática (`.github/workflows/ci.yml`): revisa los scripts, valida el compose y construye la imagen completa. Si sale en rojo, no hagas `upgrade` hasta que se corrija.
+
 ### Limpieza y migraciones (para que escale)
 
 - **Migraciones** (`migrations/NNN-*.sh`): cada mejora publicada en GitHub puede traer un script que **limpia o adapta** lo que dejó la versión anterior (variables obsoletas del `.env`, volúmenes o contenedores renombrados…). Cada uno corre **una sola vez por servidor**, en orden, durante `upgrade`, `update` e `install`, y queda registrado en `logs/.migrations-done`. La `001` ya limpia los restos de las versiones anteriores, **sin borrar datos**. Cómo escribir una nueva: [`migrations/README.md`](migrations/README.md).
@@ -134,6 +142,7 @@ Todo esto queda instalado al construir la imagen; no hay que instalar nada a man
 | Lenguajes | Node 24 (`npm`, `corepack` → `pnpm`/`yarn`), Python 3 (`uv`, `venv`), `mise` para Go, Rust, Java, otras versiones de Node/Python, etc. (sin root) |
 | Compilación | `build-essential`, `pkg-config`, `make`, `libpq-dev` (para módulos nativos de npm y pip) |
 | Bases de datos | Clientes `psql`/`pg_dump` 17, `sqlite3`, `redis-cli`, `mariadb`/`mysql`. **Servidores bajo demanda sin root:** `devdb install postgres` y `devdb install redis`. `sqlcmd`/`bcp` opcionales |
+| Secretos | **Doppler CLI** (`doppler login`, `doppler run -- …`) |
 | Agentes / IA | Claude Code, Pi, **Herdr**, Playwright, **playwright-cli** y **playwright-mcp**, con su Chromium incluido (no hace falta Google Chrome) |
 | CLI | `zsh`, `fzf`, `rg`, `fd`, `bat`, `jq`, `tree`, `htop`, `tmux`, `vim`, `nano`, `direnv`, `shellcheck`, `mosh` |
 
@@ -215,6 +224,8 @@ El archivo `.env` lo crea `setup.sh` con permisos 600. La plantilla documentada 
 | `NPM_GLOBAL_PACKAGES` | No | `@anthropic-ai/claude-code @mariozechner/pi-coding-agent playwright @playwright/cli @playwright/mcp` | Herramientas npm que se instalan dentro de la imagen. |
 | `INSTALL_PLAYWRIGHT_BROWSERS` | No | `true` | Incluye Chromium y sus librerías en la imagen. |
 | `INSTALL_HERDR` | No | `true` | Incluye [Herdr](https://herdr.dev) en la imagen. |
+| `INSTALL_DOPPLER` | No | `true` | Incluye la CLI de Doppler. |
+| `DOPPLER_TOKEN` | No | *(vacía)* | Service token de Doppler para usar `doppler run` sin `doppler login`. |
 | `PG_MAJOR` | No | `17` | Versión de PostgreSQL (servidor y cliente) dentro de la imagen. Si cambias de versión mayor, los datos existentes requieren `pg_upgrade` o un dump y restore. |
 | `INSTALL_PG_SERVER` | No | `false` | `false`: la base de datos se instala bajo demanda con `devdb install` (recomendado). `true`: el servidor ya viene en la imagen. |
 | `PG_EXTENSIONS` | No | `pgvector` | Solo aplica con `INSTALL_PG_SERVER=true`. Con `devdb` se indican en la instalación: `devdb install postgres 17 pgvector postgis-3`. |
@@ -247,6 +258,7 @@ Si cambias una variable de la imagen (`NODE_*`, `NPM_*`, `INSTALL_*`, `USER_*`),
 | `bash setup.sh uninstall --all` | **Borra todo**: proyectos, home, bases de datos, identidad SSH, el equipo en Tailscale y `.env`. Ofrece respaldo y pide escribir `BORRAR` |
 | `bash setup.sh upgrade` | **Descarga lo último de GitHub** y reconstruye (ver "Actualizar a la última versión") |
 | `bash setup.sh update` | Reconstruye la imagen sin caché, con versiones nuevas |
+| `bash setup.sh rollback` | Vuelve a la versión anterior al último `upgrade` y reconstruye |
 | `bash setup.sh clean [--deep]` | Limpia imágenes viejas, logs y respaldos antiguos |
 | `bash setup.sh migrate` | Aplica manualmente las migraciones pendientes |
 | `bash setup.sh add-key` | Autoriza una clave SSH. Sin argumento la pide para **pegar**; también acepta `'ssh-ed25519 AAAA...'`, `RUTA.pub` o `github:usuario` |
@@ -282,6 +294,20 @@ herdr          # abre o retoma tus sesiones de agentes (Claude Code, opencode, P
 ```
 
 El instalador oficial verifica el SHA-256 y deja el binario en `/usr/local/bin`. Se actualiza con `bash setup.sh update`. Si quieres una versión más nueva solo para ti, sin root: `curl -fsSL https://herdr.dev/install.sh | sh`, que la instala en `~/.local/bin` y tiene prioridad en el `PATH`.
+
+### Doppler (secretos)
+
+La CLI de [Doppler](https://docs.doppler.com) viene en la imagen (`INSTALL_DOPPLER=true`). Así las API keys y las contraseñas no quedan en archivos `.env` dentro de los proyectos.
+
+```bash
+doppler login                 # una vez, dentro del workspace; muestra un código o link para aprobar en el navegador
+cd /workspace/mi-proyecto
+doppler setup                 # elige proyecto y config (dev, stg…)
+doppler run -- npm run dev    # inyecta los secretos como variables de entorno
+```
+
+- La sesión queda en `~/.doppler` (volumen `ai_home`), así que no tienes que volver a hacer login al reconstruir.
+- **Sin login (agentes o automatizaciones):** pon un *service token* de solo lectura en `DOPPLER_TOKEN` en el `.env` del servidor y ejecuta `./setup.sh update`. `doppler run` lo usará solo.
 
 ### Playwright para agentes
 

@@ -54,6 +54,7 @@ services:
         PG_EXTENSIONS: ${PG_EXTENSIONS:-pgvector}
         INSTALL_MSSQL_TOOLS: ${INSTALL_MSSQL_TOOLS:-false}
         INSTALL_HERDR: ${INSTALL_HERDR:-true}
+        INSTALL_DOPPLER: ${INSTALL_DOPPLER:-true}
     image: ai-workspace:latest
     container_name: ai-workspace
     restart: unless-stopped
@@ -77,6 +78,8 @@ services:
       SQLCMDSERVER: mssql
       SQLCMDUSER: sa
       SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:-}
+      # Doppler: token de servicio opcional (si no, usa "doppler login" dentro del workspace)
+      DOPPLER_TOKEN: ${DOPPLER_TOKEN:-}
 
     volumes:
       - ai_home:/home/ai                            # datos/config del usuario
