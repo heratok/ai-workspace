@@ -1,4 +1,4 @@
-# ai-workspace v2
+# ai-workspace
 
 Entorno de desarrollo aislado en Docker, accesible **solo por Tailscale**.
 
