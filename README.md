@@ -68,6 +68,8 @@ curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.s
 
 Requiere `git` y Docker con `docker compose`. Si prefieres revisar el script antes de ejecutarlo: `curl -fsSLO …/install.sh && less install.sh && bash install.sh`.
 
+Si ya tienes una instancia en el servidor, volver a ejecutar el comando **crea otra** en lugar de reinstalar la existente (ver [Varias instancias en un servidor](#varias-instancias-en-un-servidor)).
+
 ### Opción B: clonar a mano
 
 ```bash
@@ -97,6 +99,53 @@ bash setup.sh install          # pide la auth key de Tailscale y tu clave SSH p�
 
 Puedes ejecutarlo de nuevo cuando quieras: los datos se conservan.
 
+## Varias instancias en un servidor
+
+Puedes tener varios entornos completamente aislados en el mismo servidor (por ejemplo, uno por cliente o por persona). Cada instancia tiene su carpeta, sus volúmenes, su imagen, su identidad SSH y su propio nodo en Tailscale: no comparten datos ni contenedores, y `uninstall` o `backup` de una nunca tocan a las demás.
+
+**Crear una segunda instancia:** ejecuta de nuevo el mismo comando de instalación.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh | bash
+```
+
+- La principal cuenta como existente solo si ya tiene contenedores o volúmenes en Docker. Si una primera instalación falló a medias (queda el clon, sin recursos), volver a ejecutar el comando la **retoma** en lugar de crear otra.
+- Si ya existe la instancia principal, `install.sh` lista las instancias del servidor y pregunta `Alias de la nueva instancia [2]`. Enter acepta el número sugerido (el siguiente libre: `2`, `3`...); escribir un alias que ya existe **actualiza** esa instancia.
+- Sin terminal interactiva (automatizaciones), crea sola la siguiente libre y lo informa.
+- Para elegir el nombre sin preguntas: `... | bash -s -- --alias cliente-a` o `AIWS_INSTANCE=cliente-a`. Si la instancia ya existe, la actualiza. `--alias default` apunta de forma explícita a la principal.
+- **Actualizar una instancia existente:** lo normal es `./setup.sh upgrade` desde su carpeta. Con el comando de una línea hay que indicarla (`--alias NOMBRE` o `--alias default`); sin alias, el comando crea una instancia nueva.
+- Alias válido: de 1 a 20 caracteres entre `a-z`, `0-9` y `-`, sin empezar ni terminar en `-`. Están reservados `ts`, `mssql`, `postgres`, `redis` y los terminados en `-ts` o `-mssql`. `default` (o vacío) es la instancia principal.
+- La instancia principal conserva exactamente sus nombres de siempre: los servidores ya instalados siguen funcionando sin migrar nada.
+
+Con el alias `foo`, todo se nombra a partir de `ai-workspace-foo`:
+
+| Recurso | Principal | Alias `foo` |
+|---|---|---|
+| Carpeta | `~/ai-workspace` | `~/ai-workspace-foo` |
+| Proyecto compose y contenedor | `ai-workspace` | `ai-workspace-foo` |
+| Sidecar de Tailscale / SQL Server | `ai-workspace-ts` / `ai-workspace-mssql` | `ai-workspace-foo-ts` / `ai-workspace-foo-mssql` |
+| Imagen | `ai-workspace:latest` | `ai-workspace-foo:latest` |
+| Volúmenes | `ai_home`, `ai_workspace`, `ai_ssh_host_keys`, `ai_ts_state`, `ai_mssql_data` | `ai-workspace-foo_home`, `_workspace`, `_ssh_host_keys`, `_ts_state`, `_mssql_data` |
+| Nombre en la tailnet (`TS_HOSTNAME`) | `ai-workspace` | `ai-workspace-foo` |
+
+Cada instancia se maneja **desde su propia carpeta**, con los mismos comandos de siempre:
+
+```bash
+cd ~/ai-workspace-foo
+./setup.sh status | shell | backup | upgrade | uninstall
+ssh ai@ai-workspace-foo          # el host SSH es el TS_HOSTNAME de la instancia
+```
+
+O, sin entrar a ninguna carpeta, con [`aiws`](#gestionar-instancias-con-aiws): `aiws ls`, `aiws upgrade foo`, `aiws shell foo`.
+
+Detalles a tener en cuenta:
+
+- **Recursos:** `MEM_LIMIT` y `CPUS` son topes por instancia (no reservas) y se suman: el instalador sugiere valores según la RAM y las instancias existentes y avisa cuando la suma supera la RAM. Se cambian sin reconstruir; ver [Recursos por instancia](#recursos-por-instancia-memoria-y-cpus).
+- **Puertos:** no hay conflictos, porque cada instancia tiene su propia red de Tailscale y no se publica nada en el servidor.
+- **Una carpeta, una instancia:** el alias queda guardado en el `.env` (`AIWS_INSTANCE`) y no se cambia después de instalar. `setup.sh` se niega a usar contenedores que gestiona otra carpeta.
+- **Tailscale:** cada instancia se registra como un equipo distinto, así que pide su propia auth key o link de login.
+- **Instalar a mano:** `git clone ... ai-workspace-foo && cd ai-workspace-foo && ./setup.sh install --alias foo`.
+
 ### Actualizar a la última versión
 
 ```bash
@@ -111,6 +160,8 @@ Puedes ejecutarlo de nuevo cuando quieras: los datos se conservan.
 **Si instalaste copiando la carpeta a mano** (versión vieja, sin `.git`), `./setup.sh upgrade` la conecta al repo y la deja en la última versión. Conserva `.env`, `logs/` y `backups/`, y reemplaza los archivos del proyecto. Si personalizaste `config/packages.apt` u otro archivo, guarda una copia antes.
 
 Otro repo o rama: `AIWS_REPO_URL=https://github.com/otro/fork.git AIWS_REPO_BRANCH=dev ./setup.sh upgrade`.
+
+**`setup.sh upgrade` sin preguntas:** `./setup.sh upgrade --yes` guarda aparte los cambios locales (`git stash`), actualiza y reconstruye; si ya está al día lo informa y no reconstruye (salvo `--rebuild`); `--foreground` se pasa al `update`. Sin `--yes` conserva las preguntas de siempre y exige una terminal: sin ella falla con un mensaje en lugar de aparentar éxito.
 
 ### Si una actualización sale mal
 
@@ -153,6 +204,57 @@ mosh -p 60000:60010 ai@ai-workspace
 ```
 
 > Cambio respecto a v1: SSH ahora es el puerto **22** en la IP de Tailscale, ya no el 2222.
+
+## Gestionar instancias con aiws
+
+`aiws` es un comando del servidor para administrar **todas** las instancias sin entrar a la carpeta de cada una. `setup.sh install` lo deja en el `PATH` (enlace en `/usr/local/bin` si se puede escribir ahí; si no, en `~/.local/bin`, y avisa si esa carpeta no está en el `PATH`). Descubre las instancias solo (contenedores etiquetados y clones `~/ai-workspace*`) y delega cada acción en el `setup.sh` de la carpeta correspondiente, así que se comporta igual que ejecutarlo a mano.
+
+```bash
+aiws ls                           # tabla: alias, estado, Tailscale, carpeta, MEM/CPUS y total reservado
+aiws upgrade santiago maria       # actualiza dos instancias, una tras otra
+aiws upgrade --all                # actualiza todas
+aiws upgrade                      # con terminal: lista numerada para elegir (1 3, 1-3 o todas)
+aiws shell santiago               # abre una shell en esa instancia
+aiws resources                      # límites y uso real de memoria y CPU de todas
+aiws resources santiago --mem 4g --cpus 2   # cambia los topes de una, sin reconstruir
+aiws help                         # todos los comandos; aiws help upgrade o aiws upgrade --help para uno solo
+```
+
+- **Alias:** los de `aiws ls`. `default` (o `principal`) es la instancia principal. Un alias desconocido se rechaza antes de ejecutar nada.
+- **Varias instancias a la vez** (`upgrade`, `update`, `backup`, `status`, `doctor`, `ts-status`): se ejecutan en orden, **si una falla las demás continúan**, y al final hay un resumen `ok`/`fallo`; el código de salida es distinto de cero si alguna falló. Sin argumentos, `upgrade`, `update` y `backup` muestran la lista para elegir (sin terminal exigen alias o `--all`); `status`, `doctor` y `ts-status` actúan sobre todas.
+- **`upgrade` y `update` piden UNA confirmación al inicio** ("Se actualizarán y reconstruirán: 2, santiago. ¿Continuar? [s/N]") y luego corren cada instancia sin más preguntas ni lectura del teclado, así que ninguna puede colgar el lote. Con `--yes` (o `-y`) se omite la confirmación (`aiws upgrade --all --yes`); sin terminal es obligatorio y, si falta, `aiws` sale con código 2 sin ejecutar nada. El resumen final distingue `ok (actualizada)`, `ok (ya al día)` y `fallo`.
+- **Una sola instancia** (`shell`, `logs`, `psql`, `components`, `add-key`, `migrate`, `progress`, `down`): `aiws <comando> <alias> [opciones]`.
+- **Destructivos, siempre una sola instancia** (`rollback`, `clean`, `uninstall`, `purge`): no aceptan `--all` ni varios alias, y `setup.sh` sigue pidiendo su confirmación.
+- **Opciones para `setup.sh`:** en los comandos de varias instancias van después de `--` (`aiws upgrade santiago -- --foreground`); en los demás, tras el alias (`aiws uninstall santiago --all`).
+- Al volver a ejecutar `install.sh` con instancias existentes y una terminal interactiva, un menú ofrece crear una instancia nueva, actualizar una existente (`setup.sh upgrade`, que descarga lo nuevo, migra y ofrece reconstruir) o actualizarlas todas. Sin terminal, sigue creando la siguiente libre.
+
+## Recursos por instancia (memoria y CPUs)
+
+Cada instancia tiene sus propios **topes** de recursos, que se guardan en su `.env`: `MEM_LIMIT`, `CPUS`, `SHM_SIZE` (`/dev/shm`, por defecto `2gb`), `PIDS_LIMIT` (por defecto `2048`) y `MSSQL_MEM_LIMIT` (SQL Server, por defecto `4g`). Son máximos, **no reservas**: una instancia que no usa su memoria no se la quita a las demás. Por eso la suma de los topes puede superar la RAM del servidor; solo habría problema si varias instancias llegaran a usarlos a la vez (`aiws ls` y `aiws resources` muestran la suma frente a la RAM y avisan).
+
+**Al instalar:**
+
+```bash
+# Con tus valores
+curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh | bash -s -- --mem 4g --cpus 2
+```
+
+Si no los indicas, en una instancia **nueva** `setup.sh` sugiere valores según la RAM del servidor, sus CPUs y cuántas instancias hay ya: `(RAM - 2g para el servidor) / (instancias + 1)`, entre 2g y 8g, y como máximo 4 CPUs. Con terminal pregunta `Memoria máxima [3g]` y `CPUs [2]` (Enter acepta la sugerencia); sin terminal aplica la sugerencia y la muestra. Si el servidor es muy pequeño usa el mínimo (2g) y avisa. Nunca se cambian solos los valores de una instancia que ya existe (la principal instalada antes conserva `8g` y `4`).
+
+**Cambiar después, sin reconstruir** (en segundos; solo se recrean los contenedores de esa instancia):
+
+```bash
+./setup.sh resources                              # límites actuales y uso real (docker stats)
+./setup.sh resources --mem 4g --cpus 2            # cambia y aplica
+./setup.sh resources --shm 1g --pids 4096         # /dev/shm y máximo de procesos
+./setup.sh resources --mem 4g --no-apply          # solo guarda en .env
+./setup.sh resources --set                        # pregunta cada valor (Enter conserva el actual)
+
+aiws resources                                    # tabla de todas: límites, uso real y totales del servidor
+aiws resources santiago --mem 4g --cpus 2         # cambia una instancia desde cualquier carpeta
+```
+
+Validaciones: memoria y `/dev/shm` como `512m`, `4g` o `1.5g` (sin distinguir mayúsculas); memoria mínima `1g` (con menos de `2g` avisa: Chromium/Playwright); CPUs un número positivo que no supere las del servidor; procesos un entero de al menos `256`. Si algún valor es inválido no se cambia nada.
 
 ## Componentes: instala solo lo que necesitas
 
@@ -257,14 +359,17 @@ El archivo `.env` lo crea `setup.sh` con permisos 600. La plantilla documentada 
 
 | Variable | Obligatoria | Por defecto | Descripción |
 |---|---|---|---|
+| `AIWS_INSTANCE` | No | *(vacía = instancia principal)* | Alias de la instancia (ver [Varias instancias](#varias-instancias-en-un-servidor)). Lo escribe `setup.sh`; no lo cambies después de instalar. Junto con `AIWS_NAME` y `AIWS_VOL_PREFIX`, que se derivan de él, define los nombres de contenedores, imagen y volúmenes. |
 | `TS_AUTHKEY` | No (el script la pide) | *(vacía)* | Auth key de Tailscale (`tskey-auth-...`). Si está vacía, el script la pide o da un link de login. Se borra tras registrar el nodo. Solo vuelve a pedirse si borras el volumen `ai_ts_state`. |
-| `TS_HOSTNAME` | No | `ai-workspace` | Nombre del equipo en la tailnet (y en MagicDNS). |
+| `TS_HOSTNAME` | No | `ai-workspace` (instancia con alias: `ai-workspace-<alias>`) | Nombre del equipo en la tailnet (y en MagicDNS). |
 | `TS_EXTRA_ARGS` | No | *(vacía)* | Argumentos extra de `tailscale up`, por ejemplo `--advertise-tags=tag:ai-workspace`. |
 | `TS_IMAGE_TAG` | No | `stable` | Versión de la imagen `tailscale/tailscale`. Fíjala (p. ej. `v1.90.0`) si quieres que nada cambie solo. |
 | `DNS_SERVER` | No | `1.1.1.1` | DNS que usan los contenedores para salir a internet. |
 | `USER_UID` / `USER_GID` | No | `1000` | Deben coincidir con el dueño actual del volumen `ai_home`. |
 | `FIX_OWNERSHIP` | No | `false` | Ponla en `true` **una sola vez** si cambiaste el UID o GID; hace un `chown` recursivo del home y del workspace. |
-| `MEM_LIMIT` / `CPUS` | No | `8g` / `4` | Límites de recursos del workspace. |
+| `MEM_LIMIT` / `CPUS` | No | `8g` / `4` | Topes de memoria y CPUs del workspace (por instancia; ver [Recursos](#recursos-por-instancia-memoria-y-cpus)). En una instalación nueva se sugieren según el servidor. |
+| `SHM_SIZE` / `PIDS_LIMIT` | No | `2gb` / `2048` | Memoria compartida (`/dev/shm`) y máximo de procesos del workspace. |
+| `MSSQL_MEM_LIMIT` | No | `4g` | Tope de memoria del contenedor de SQL Server. |
 | `NODE_MAJOR` | No | `24` | Versión mayor de Node.js. |
 | `NODE_VERSION` | No | *(vacía = última del major)* | Versión exacta de Node (p. ej. `24.11.1`), para que cada build dé el mismo resultado. |
 | `INSTALL_PLAYWRIGHT_BROWSERS` | No | `true` | Incluye Chromium y sus librerías en la imagen. |
@@ -285,6 +390,8 @@ Si cambias una variable de la imagen (`NODE_*`, `NPM_*`, `INSTALL_*`, `USER_*`),
 
 ## Volúmenes
 
+Los nombres son los de la instancia principal. En una instancia con alias `foo` son `ai-workspace-foo_home`, `ai-workspace-foo_workspace`, etc. (ver la tabla de [Varias instancias](#varias-instancias-en-un-servidor)).
+
 | Volumen | Contenido | Si lo borras… |
 |---|---|---|
 | `ai_home` | Home del usuario: configuraciones, instalaciones sin root y **datos de PostgreSQL y Redis** (`~/.local/share/devdb`) | Pierdes tu configuración personal y tus bases locales |
@@ -298,7 +405,7 @@ Si cambias una variable de la imagen (`NODE_*`, `NPM_*`, `INSTALL_*`, `USER_*`),
 | Comando | Para qué |
 |---|---|
 | `bash setup.sh` | **Menú**: instalar o actualizar, **ver el progreso**, estado, agregar clave SSH, respaldar, desinstalar. Si hay una instalación en curso, lo avisa y la opción por defecto es ver el progreso |
-| `bash setup.sh install` | Instala o reinstala todo |
+| `bash setup.sh install` | Instala o reinstala todo. Con `--alias NOMBRE` crea una instancia aislada (lo normal es usar `install.sh`) |
 | `bash setup.sh progress` | Ver en vivo el progreso (o el resultado) de la última instalación o actualización, por ejemplo tras reconectar |
 | `bash setup.sh backup` | Respalda el home y los proyectos (incluidas las bases de datos de `devdb`) en `./backups/*.tar.gz` |
 | `bash setup.sh uninstall` | Quita contenedores, red e imagen. **Conserva** datos, `.env` e identidades; `install` lo deja como estaba |
@@ -307,6 +414,7 @@ Si cambias una variable de la imagen (`NODE_*`, `NPM_*`, `INSTALL_*`, `USER_*`),
 | `bash setup.sh update` | Reconstruye la imagen sin caché, con versiones nuevas |
 | `bash setup.sh components` | Elige qué agentes y herramientas trae la imagen (y reconstruye) |
 | `bash setup.sh rollback` | Vuelve a la versión anterior al último `upgrade` y reconstruye |
+| `bash setup.sh resources [--mem 4g --cpus 2 ...]` | Ver límites y uso real, o cambiarlos sin reconstruir (`--set` pregunta cada valor, `--no-apply` solo guarda) |
 | `bash setup.sh clean [--deep]` | Limpia imágenes viejas, logs y respaldos antiguos |
 | `bash setup.sh migrate` | Aplica manualmente las migraciones pendientes |
 | `bash setup.sh add-key` | Autoriza una clave SSH. Sin argumento la pide para **pegar**; también acepta `'ssh-ed25519 AAAA...'`, `RUTA.pub` o `github:usuario` |

@@ -18,17 +18,43 @@ jobs:
       - uses: actions/checkout@v4
       - name: Sintaxis bash
         run: |
-          for f in install.sh setup.sh entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh migrations/*.sh; do
+          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh migrations/*.sh tests/*.sh; do
             bash -n "$f" && echo "ok $f"
           done
           sh -n config/env.sh
       - name: ShellCheck (solo errores)
-        run: shellcheck -S error install.sh setup.sh entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh
+        run: shellcheck -S error install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh tests/instances.test.sh tests/aiws.test.sh
+      - name: Pruebas de multi-instancia
+        run: bash tests/instances.test.sh
+      - name: Pruebas del comando aiws
+        run: bash tests/aiws.test.sh
       - name: docker compose config
         run: |
           cp env.example .env
           sed -i 's/external: true/external: false/' docker-compose.yml
           docker compose config -q
+          # Instancia principal: nombres de siempre (sin migrar servidores existentes)
+          docker compose config > default.out
+          for n in 'name: ai-workspace' 'container_name: ai-workspace-ts' 'image: ai-workspace:latest' 'name: ai_home' 'name: ai_ts_state' 'name: ai_ssh_host_keys'; do
+            grep -qxE "[[:space:]]*$n" default.out || { echo "FALTA en la instancia principal: $n"; exit 1; }
+          done
+          # Instancia con alias: todo deriva de AIWS_NAME / AIWS_VOL_PREFIX
+          sed -i -E '/^(AIWS_INSTANCE|TS_HOSTNAME|COMPOSE_PROFILES)=/d' .env
+          { echo AIWS_INSTANCE=foo; echo AIWS_NAME=ai-workspace-foo; echo AIWS_VOL_PREFIX=ai-workspace-foo; echo TS_HOSTNAME=ai-workspace-foo; echo COMPOSE_PROFILES=mssql; } >> .env
+          docker compose config > alias.out
+          for n in 'name: ai-workspace-foo' 'container_name: ai-workspace-foo' 'container_name: ai-workspace-foo-ts' 'container_name: ai-workspace-foo-mssql' \
+                   'image: ai-workspace-foo:latest' 'name: ai-workspace-foo_home' 'name: ai-workspace-foo_workspace' 'name: ai-workspace-foo_ssh_host_keys' \
+                   'name: ai-workspace-foo_ts_state' 'name: ai-workspace-foo_mssql_data' 'hostname: ai-workspace-foo'; do
+            grep -qxE "[[:space:]]*$n" alias.out || { echo "FALTA en la instancia foo: $n"; exit 1; }
+          done
+          ! grep -qE '(name|container_name): ai_|name: ai-workspace$|ai-workspace-ts$' alias.out || { echo "La instancia foo comparte nombres con la principal"; exit 1; }
+          # Recursos configurables por .env (SHM_SIZE, PIDS_LIMIT, MEM_LIMIT, CPUS) con los mismos valores por defecto de siempre
+          grep -qE 'shm_size: .?2gb|shm_size: "?2147483648"?' default.out || { echo "shm_size por defecto cambió"; exit 1; }
+          grep -qE 'pids_limit: 2048' default.out || { echo "pids_limit por defecto cambió"; exit 1; }
+          { echo SHM_SIZE=1g; echo PIDS_LIMIT=4096; echo MEM_LIMIT=3g; echo CPUS=2; } >> .env
+          docker compose config > res.out
+          grep -qE 'pids_limit: 4096' res.out || { echo "PIDS_LIMIT no se aplica"; exit 1; }
+          grep -qE 'shm_size: .?(1g|1073741824)' res.out || { echo "SHM_SIZE no se aplica"; exit 1; }
 
   build:
     needs: lint

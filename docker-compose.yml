@@ -1,5 +1,5 @@
 # Variables: ver README.md -> "Variables del .env" y el archivo env.example
-name: ai-workspace
+name: ${AIWS_NAME:-ai-workspace}              # proyecto compose = nombre de la instancia (ver AIWS_INSTANCE en .env)
 
 services:
   # ---------------------------------------------------------------------------
@@ -7,12 +7,14 @@ services:
   # ---------------------------------------------------------------------------
   tailscale:
     image: tailscale/tailscale:${TS_IMAGE_TAG:-stable}
-    container_name: ai-workspace-ts
-    hostname: ${TS_HOSTNAME:-ai-workspace}          # nombre del equipo en tu tailnet
+    container_name: ${AIWS_NAME:-ai-workspace}-ts
+    hostname: ${TS_HOSTNAME:-${AIWS_NAME:-ai-workspace}}          # nombre del equipo en tu tailnet
     restart: unless-stopped
+    labels:
+      org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}   # setup.sh/install.sh detectan así las instancias
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}                   # solo se usa en el primer registro
-      TS_HOSTNAME: ${TS_HOSTNAME:-ai-workspace}
+      TS_HOSTNAME: ${TS_HOSTNAME:-${AIWS_NAME:-ai-workspace}}
       TS_STATE_DIR: /var/lib/tailscale              # identidad persistente del nodo
       TS_USERSPACE: "false"                         # modo kernel: TCP y UDP (mosh) completos
       TS_ACCEPT_DNS: "false"
@@ -42,6 +44,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      labels:
+        org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}   # "clean" solo borra las imágenes viejas de esta instancia
       args:
         USER_UID: ${USER_UID:-1000}                 # dueño del volumen ai_home
         USER_GID: ${USER_GID:-1000}
@@ -62,10 +66,12 @@ services:
         INSTALL_MSSQL_TOOLS: ${INSTALL_MSSQL_TOOLS:-false}
         INSTALL_HERDR: ${INSTALL_HERDR:-true}
         INSTALL_DOPPLER: ${INSTALL_DOPPLER:-true}
-    image: ai-workspace:latest
-    container_name: ai-workspace
+    image: ${AIWS_NAME:-ai-workspace}:latest
+    container_name: ${AIWS_NAME:-ai-workspace}
     restart: unless-stopped
     init: true                                      # recoge procesos zombie
+    labels:
+      org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}
     network_mode: service:tailscale                 # sin "ports:" ni "hostname:" (los da el sidecar)
     depends_on:
       tailscale:
@@ -75,8 +81,8 @@ services:
       - "no-new-privileges:true"
     mem_limit: ${MEM_LIMIT:-8g}
     cpus: ${CPUS:-4}
-    pids_limit: 2048
-    shm_size: "2gb"                                 # Chromium necesita /dev/shm grande
+    pids_limit: ${PIDS_LIMIT:-2048}
+    shm_size: ${SHM_SIZE:-2gb}                                 # Chromium necesita /dev/shm grande
 
     environment:
       FIX_OWNERSHIP: ${FIX_OWNERSHIP:-false}
@@ -87,6 +93,8 @@ services:
       SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:-}
       # Doppler: token de servicio opcional (si no, usa "doppler login" dentro del workspace)
       DOPPLER_TOKEN: ${DOPPLER_TOKEN:-}
+      # Nombre del equipo en la tailnet: devdb lo usa en las instrucciones de túnel SSH
+      AIWS_HOSTNAME: ${TS_HOSTNAME:-${AIWS_NAME:-ai-workspace}}
 
     volumes:
       - ai_home:/home/ai                            # datos/config del usuario
@@ -100,10 +108,12 @@ services:
   # ---------------------------------------------------------------------------
   mssql:
     image: mcr.microsoft.com/mssql/server:${MSSQL_IMAGE_TAG:-2022-latest}
-    container_name: ai-workspace-mssql
+    container_name: ${AIWS_NAME:-ai-workspace}-mssql
     profiles: [mssql]
     platform: linux/amd64                          # SQL Server solo publica imagen x86_64
     restart: unless-stopped
+    labels:
+      org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer                          # gratis para desarrollo, no producción
@@ -113,14 +123,18 @@ services:
       - mssql_data:/var/opt/mssql
     mem_limit: ${MSSQL_MEM_LIMIT:-4g}
 
+# Nombres fijos aunque cambie la carpeta. Instancia principal: ai_home, ai_workspace...
+# Instancia con alias: ai-workspace-ALIAS_home, ... (AIWS_VOL_PREFIX lo escribe setup.sh en .env)
 volumes:
   ai_home:
+    name: ${AIWS_VOL_PREFIX:-ai}_home
     external: true
   ai_workspace:
+    name: ${AIWS_VOL_PREFIX:-ai}_workspace
     external: true
   ssh_host_keys:
-    name: ai_ssh_host_keys                          # nombre fijo aunque cambie la carpeta
+    name: ${AIWS_VOL_PREFIX:-ai}_ssh_host_keys
   ts_state:
-    name: ai_ts_state                               # borrar = nodo nuevo (requiere TS_AUTHKEY)
+    name: ${AIWS_VOL_PREFIX:-ai}_ts_state          # borrar = nodo nuevo (requiere TS_AUTHKEY)
   mssql_data:
-    name: ai_mssql_data
+    name: ${AIWS_VOL_PREFIX:-ai}_mssql_data

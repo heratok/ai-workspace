@@ -1,0 +1,560 @@
+#!/usr/bin/env bash
+# =============================================================================
+# aiws - gestiona todas las instancias de ai-workspace de este servidor
+#
+#   aiws ls                          Lista las instancias
+#   aiws upgrade santiago maria      Actualiza varias, una tras otra
+#   aiws upgrade --all               Actualiza todas
+#   aiws shell santiago              Abre una shell en una instancia
+#   aiws help                        Todos los comandos
+#
+# No duplica la lógica de setup.sh: cada acción se delega a <carpeta-de-la-instancia>/setup.sh
+# ejecutado dentro de esa carpeta. Las instancias se descubren solas (contenedores etiquetados
+# y clones ~/ai-workspace*), así que funciona igual desde cualquier clon.
+# =============================================================================
+
+set -Eeuo pipefail
+
+INSTANCE_LABEL="org.ai-workspace.instance"
+OWNER_LABEL="com.docker.compose.project.working_dir"
+
+c_ok=$'\e[32m'; c_warn=$'\e[33m'; c_err=$'\e[31m'; c_off=$'\e[0m'
+info() { echo "${c_ok}==>${c_off} $*"; }
+warn() { echo "${c_warn}[aviso]${c_off} $*" >&2; }
+die()  { echo "${c_err}[error]${c_off} $*" >&2; exit 1; }
+
+# ----------------------------------------------------------------- comandos
+# ÚNICA fuente de verdad: el despachador y la ayuda salen de esta tabla.
+#   nombre|tipo|qué hace|ejemplo
+# Tipos:
+#   ls           lista las instancias
+#   help         ayuda
+#   multi        acepta varios alias o --all (sin argumentos: elegir de una lista)
+#   multi-ro     igual, pero solo lectura: sin argumentos actúa sobre todas
+#   multi-build  como multi, pero reconstruye imágenes: pide UNA confirmación previa (-y/--yes la omite)
+#   resources    sin cambios: tabla para varias o todas; con --mem/--cpus/...: una sola instancia
+#   single       exige exactamente un alias
+#   destructive  exige exactamente un alias y borra o revierte algo
+AIWS_CMDS=(
+  "ls|ls|Lista las instancias del servidor (estado, Tailscale, carpeta y recursos)|aiws ls"
+  "help|help|Muestra esta ayuda, o la de un comando|aiws help upgrade"
+  "resources|resources|Muestra límites y uso real de memoria y CPU, o los cambia sin reconstruir (--mem, --cpus, --shm, --pids, --mssql-mem)|aiws resources santiago --mem 4g --cpus 2"
+  "upgrade|multi-build|Descarga lo último de GitHub, migra y reconstruye la instancia (pide una confirmación; --yes la omite)|aiws upgrade santiago maria"
+  "update|multi-build|Reconstruye la imagen sin caché, con versiones nuevas (pide una confirmación; --yes la omite)|aiws update santiago"
+  "backup|multi|Respalda home y proyectos en la carpeta backups/ de la instancia|aiws backup santiago maria"
+  "status|multi-ro|Estado de los contenedores|aiws status"
+  "doctor|multi-ro|Diagnóstico de herramientas, rutas y permisos dentro del workspace|aiws doctor santiago"
+  "ts-status|multi-ro|Estado de Tailscale|aiws ts-status santiago"
+  "shell|single|Abre una shell como usuario ai dentro del workspace|aiws shell santiago"
+  "logs|single|Sigue los registros de los contenedores|aiws logs santiago"
+  "psql|single|Abre psql contra el PostgreSQL local del workspace|aiws psql santiago"
+  "components|single|Elige qué agentes y herramientas trae la imagen|aiws components santiago"
+  "add-key|single|Autoriza una clave SSH (pegada, RUTA.pub o github:usuario)|aiws add-key santiago github:usuario"
+  "migrate|single|Aplica las migraciones pendientes|aiws migrate santiago"
+  "progress|single|Muestra el progreso de la última instalación o actualización|aiws progress santiago"
+  "down|single|Detiene los contenedores (los datos se conservan)|aiws down santiago"
+  "rollback|destructive|Vuelve a la versión anterior al último upgrade y reconstruye|aiws rollback santiago"
+  "clean|destructive|Borra imágenes viejas, logs y respaldos antiguos (--deep: caché de Docker)|aiws clean santiago --deep"
+  "uninstall|destructive|Quita contenedores e imagen (con --all borra también datos y .env)|aiws uninstall santiago"
+  "purge|destructive|Borra TODO de la instancia: datos, volúmenes, .env y el nodo de Tailscale|aiws purge santiago"
+)
+AIWS_CMD_NAMES=()
+for _row in "${AIWS_CMDS[@]}"; do AIWS_CMD_NAMES+=("${_row%%|*}"); done
+unset _row
+
+cmd_field() {   # cmd_field <comando> <1=tipo|2=descripción|3=ejemplo>; falla si no existe
+  local row name kind desc example
+  for row in "${AIWS_CMDS[@]}"; do
+    IFS='|' read -r name kind desc example <<<"$row"
+    [[ "$name" == "$1" ]] || continue
+    case "$2" in 1) echo "$kind" ;; 2) echo "$desc" ;; 3) echo "$example" ;; esac
+    return 0
+  done
+  return 1
+}
+
+kind_tag() {
+  case "$1" in
+    multi|multi-ro|multi-build) echo "varias" ;;
+    single)         echo "una sola" ;;
+    resources)      echo "ver/cambiar" ;;
+    destructive)    echo "destructivo" ;;
+    *)              echo "" ;;
+  esac
+}
+
+# ------------------------------------------------------------------- ayuda
+show_help() {
+  local row name kind desc example
+  cat <<EOF
+aiws - gestiona todas las instancias de ai-workspace de este servidor
+
+Uso:
+  aiws [comando] [instancias...] [opciones]
+
+Las instancias se indican por alias ("default" o "principal" es la instancia principal).
+Para ver cuáles hay: aiws ls. Sin argumentos, aiws equivale a "aiws ls".
+
+Comandos:
+EOF
+  for row in "${AIWS_CMDS[@]}"; do
+    IFS='|' read -r name kind desc example <<<"$row"
+    printf '  %-10s %-12s %s\n' "$name" "$(kind_tag "$kind")" "$desc"
+  done
+  cat <<'EOF'
+
+Columna central:
+  varias       acepta uno o varios alias, o --all (todas). Se ejecutan una tras otra, y si una
+               falla las demás continúan; al final se muestra un resumen. Sin argumentos:
+               upgrade, update y backup muestran una lista para elegir; status, doctor y
+               ts-status actúan sobre todas.
+  una sola     exige exactamente un alias.
+  ver/cambiar  resources: para ver acepta varios alias o --all; para cambiar límites, una sola instancia.
+  destructivo  exige exactamente un alias y borra o revierte algo (pide confirmación).
+
+  upgrade y update reconstruyen imágenes: aiws pide UNA confirmación antes de empezar (con terminal) y
+               corre cada instancia sin más preguntas. --yes (o -y) la omite; sin terminal es obligatorio.
+
+Opciones para setup.sh: en comandos de "varias" van después de --; en los demás, tras el alias.
+  aiws upgrade santiago -- --foreground      aiws uninstall santiago --all
+
+Ejemplos:
+  aiws ls                          Lista las instancias y los recursos reservados
+  aiws upgrade santiago maria      Actualiza dos instancias, una tras otra
+  aiws upgrade --all               Actualiza todas
+  aiws upgrade                     Elige de una lista (ej.: 1 3, 1-3 o todas)
+  aiws shell santiago              Abre una shell en esa instancia
+
+Más ayuda: aiws help <comando>   |   aiws <comando> --help
+EOF
+}
+
+show_cmd_help() {
+  local cmd="$1" kind desc example usage who
+  kind="$(cmd_field "$cmd" 1)"; desc="$(cmd_field "$cmd" 2)"; example="$(cmd_field "$cmd" 3)"
+  case "$kind" in
+    ls)          usage="aiws ls"
+                 who="No necesita instancias: muestra todas." ;;
+    help)        usage="aiws help [comando]"
+                 who="Sin argumentos muestra todos los comandos; con un comando, su ayuda." ;;
+    multi)       usage="aiws $cmd [alias...|--all] [-- opciones de setup.sh]"
+                 who="varias instancias (alias separados por espacio) o --all. Sin argumentos muestra una lista para elegir (con terminal). Se ejecutan en orden y, si una falla, las demás continúan." ;;
+    multi-build) usage="aiws $cmd [alias...|--all] [-y|--yes] [-- opciones de setup.sh]"
+                 who="varias instancias o --all. Sin argumentos muestra una lista para elegir (con terminal). Antes de empezar pide UNA confirmación con la lista de instancias; --yes (o -y) la omite y es obligatorio sin terminal. Se ejecutan en orden y, si una falla, las demás continúan; el resumen distingue actualizada, ya al día y fallo." ;;
+    resources)   usage="aiws resources [alias...|--all]   |   aiws resources <alias> --mem 4g --cpus 2 [--shm 1g] [--pids 4096] [--mssql-mem 2g] [--no-apply] [--set]"
+                 who="para VER: varias instancias o --all (sin argumentos, todas), con límites y uso real. Para CAMBIAR (cualquier opción --mem, --cpus, --shm, --pids, --mssql-mem o --set): una sola instancia. Se aplica en segundos recreando solo sus contenedores, sin reconstruir la imagen; --no-apply solo guarda en .env; --set pregunta cada valor (con terminal). Son topes, no reservas." ;;
+    multi-ro)    usage="aiws $cmd [alias...|--all] [-- opciones de setup.sh]"
+                 who="varias instancias o --all. Sin argumentos actúa sobre todas (solo lectura). Se ejecutan en orden y, si una falla, las demás continúan." ;;
+    single)      usage="aiws $cmd <alias> [opciones de setup.sh]"
+                 who="una sola instancia a la vez (alias obligatorio)." ;;
+    destructive) usage="aiws $cmd <alias> [opciones de setup.sh]"
+                 who="una sola instancia a la vez (alias obligatorio). Es un comando destructivo: setup.sh pide confirmación antes de borrar o revertir." ;;
+  esac
+  cat <<EOF
+Uso: $usage
+
+$desc.
+
+Instancias: $who
+Ejemplo: $example
+EOF
+}
+
+# ------------------------------------------------------------- descubrimiento
+# Llena INST_DIRS / INST_ALIASES (principal primero, luego por alias) e INST_WARN.
+# Fuentes: contenedores etiquetados (con su carpeta de compose) y clones ~/ai-workspace*.
+inst_env() {   # inst_env <carpeta> <VARIABLE> <defecto>
+  local v=""
+  [[ -f "$1/.env" ]] && v="$(grep -E "^$2=" "$1/.env" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  echo "${v:-$3}"
+}
+
+inst_discover() {
+  INST_DIRS=(); INST_ALIASES=(); INST_WARN=()
+  local -a cand=()     # "carpeta|pista de alias|1 si es de confianza (contenedores o registro)"
+  local label dir d hint trust seen="" canon alias rows="" rank reg
+  while IFS='|' read -r label dir; do
+    [[ -z "$label" ]] && continue
+    cand+=("$dir|${label#ai-workspace}|1")
+  done < <(docker ps -a --filter "label=$INSTANCE_LABEL" \
+             --format "{{.Label \"$INSTANCE_LABEL\"}}|{{.Label \"$OWNER_LABEL\"}}" 2>/dev/null || true)
+  # La principal instalada antes de las etiquetas no tiene ninguna: se ubica por su sidecar
+  dir="$(docker inspect -f "{{index .Config.Labels \"$OWNER_LABEL\"}}" ai-workspace-ts 2>/dev/null || true)"
+  [[ -n "$dir" ]] && cand+=("$dir||1")
+  # Registro por usuario (lo escribe setup.sh): instancias en cualquier carpeta, aunque no tengan contenedores
+  reg="${XDG_DATA_HOME:-$HOME/.local/share}/ai-workspace/instances"
+  if [[ -f "$reg" ]]; then
+    while IFS= read -r dir; do [[ -n "$dir" ]] && cand+=("$dir||1"); done < "$reg"
+  fi
+  # Clones en ~: solo cuentan si su carpeta coincide con el alias de su .env (si no, parecen copias)
+  for d in "$HOME"/ai-workspace "$HOME"/ai-workspace-*; do
+    [[ -f "$d/setup.sh" ]] && cand+=("$d|${d##*/ai-workspace}|0")
+  done
+
+  for label in ${cand[@]+"${cand[@]}"}; do
+    dir="${label%%|*}"; hint="${label#*|}"; trust="${hint##*|}"; hint="${hint%|*}"; hint="${hint#-}"
+    if [[ ! -f "$dir/setup.sh" ]]; then
+      [[ " ${INST_WARN[*]-} " == *" $dir "* ]] || INST_WARN+=("La carpeta $dir ya no existe o no tiene setup.sh: se omite.")
+      continue
+    fi
+    canon="$(readlink -f "$dir" 2>/dev/null || echo "$dir")"
+    [[ "$seen" == *"|$canon|"* ]] && continue
+    seen+="|$canon|"
+    if [[ -f "$dir/.env" ]]; then alias="$(inst_env "$dir" AIWS_INSTANCE "")"; else alias="$hint"; fi
+    [[ -z "$alias" ]] && alias=default
+    if [[ "$trust" != 1 && "${dir##*/}" != "$(inst_name "$alias")" ]]; then
+      INST_WARN+=("La carpeta $dir parece una copia (su .env dice '$alias'): se ignora. Si es una instancia real, instálala o actualízala desde ahí para registrarla.")
+      continue
+    fi
+    rank=1; [[ "$alias" == default ]] && rank=0
+    rows+="$rank"$'\t'"$alias"$'\t'"$dir"$'\n'
+  done
+  while IFS=$'\t' read -r rank alias dir; do
+    [[ -z "$alias" ]] && continue
+    INST_ALIASES+=("$alias"); INST_DIRS+=("$dir")
+  done < <(printf '%s' "$rows" | LC_ALL=C sort -t $'\t' -k1,1n -k2,2V -k3,3)
+}
+
+inst_name() { if [[ "$1" == default ]]; then echo ai-workspace; else echo "ai-workspace-$1"; fi; }
+
+inst_state() {   # running | stopped | sin contenedores
+  local st
+  st="$(docker inspect -f '{{.State.Status}}' "$(inst_name "$1")" 2>/dev/null)" || { echo "sin contenedores"; return 0; }
+  if [[ "$st" == running ]]; then echo running; else echo stopped; fi
+}
+
+inst_sum_mem() {   # suma de MEM_LIMIT (8g, 512m...) en g
+  printf '%s\n' "$@" | awk '
+    { v=tolower($0); sub(/b$/,"",v); n=v+0; u=substr(v,length(v),1)
+      if (u=="g") s+=n; else if (u=="m") s+=n/1024; else if (u=="k") s+=n/1048576; else if (u=="t") s+=n*1024; else s+=n/1073741824 }
+    END { if (s==int(s)) printf "%dg\n", s; else printf "%.1fg\n", s }'
+}
+
+inst_resolve() {   # alias -> índice (0..n-1); "principal" = default; falla si no existe o es ambiguo
+  local want="$1" i list
+  local -a found=()
+  [[ "$want" == principal ]] && want=default
+  for i in "${!INST_ALIASES[@]}"; do
+    [[ "${INST_ALIASES[i]}" == "$want" ]] && found+=("$i")
+  done
+  if (( ${#found[@]} == 1 )); then echo "${found[0]}"; return 0; fi
+  if (( ${#found[@]} > 1 )); then
+    list=""; for i in "${found[@]}"; do list+="${list:+, }${INST_DIRS[i]}"; done
+    echo "${c_err}[error]${c_off} El alias '$1' es ambiguo: lo usan varias carpetas ($list). Corrige el AIWS_INSTANCE del .env que sobre." >&2
+    return 1
+  fi
+  list="$(IFS=,; echo "${INST_ALIASES[*]}")"; list="${list//,/, }"
+  echo "${c_err}[error]${c_off} Instancia desconocida '$1'. Válidas: ${list:-ninguna} (principal = default)" >&2
+  return 1
+}
+
+# ----------------------------------------------------------------------- ls
+cmd_ls() {
+  inst_discover
+  local w
+  for w in ${INST_WARN[@]+"${INST_WARN[@]}"}; do warn "$w"; done
+  if (( ${#INST_DIRS[@]} == 0 )); then
+    echo "No hay instancias de ai-workspace en este servidor. Crea una con install.sh."
+    return 0
+  fi
+  local i a n mem cpus host st
+  local -a mems=() cpuv=()
+  printf '%-3s %-14s %-24s %-17s %-24s %-6s %-5s %s\n' N ALIAS NOMBRE ESTADO TAILSCALE MEM CPUS CARPETA
+  for i in "${!INST_DIRS[@]}"; do
+    a="${INST_ALIASES[i]}"; n="$(inst_name "$a")"
+    mem="$(inst_env "${INST_DIRS[i]}" MEM_LIMIT 8g)"; cpus="$(inst_env "${INST_DIRS[i]}" CPUS 4)"
+    host="$(inst_env "${INST_DIRS[i]}" TS_HOSTNAME "$n")"; st="$(inst_state "$a")"
+    mems+=("$mem"); cpuv+=("$cpus")
+    printf '%-3s %-14s %-24s %-17s %-24s %-6s %-5s %s\n' "$((i + 1))" "$a" "$n" "$st" "$host" "$mem" "$cpus" "${INST_DIRS[i]}"
+  done
+  inst_totals
+}
+
+# --------------------------------------------------------- selección interactiva
+inst_have_tty() { { : </dev/tty; } 2>/dev/null; }
+inst_prompt()   { local a=""; read -rp "$1" a </dev/tty || true; echo "$a"; }
+
+# "1 3", "1,3", "1-3", "todas"/"all": imprime los números (1..n) sin repetir y en orden.
+# Devuelve 1 si es inválido y 2 si está vacío (cancelar).
+inst_parse_selection() {
+  local in n="$2" tok a b i
+  in="$(tr 'A-Z' 'a-z' <<<"$1")"; in="${in//,/ }"
+  [[ -z "${in//[[:space:]]/}" ]] && return 2
+  local -a sel=()
+  case "${in//[[:space:]]/}" in
+    todas|all|t) for ((i = 1; i <= n; i++)); do sel+=("$i"); done ;;
+    *) for tok in $in; do
+         if [[ "$tok" =~ ^[0-9]+$ ]]; then a="$tok"; b="$tok"
+         elif [[ "$tok" =~ ^([0-9]+)-([0-9]+)$ ]]; then a="${BASH_REMATCH[1]}"; b="${BASH_REMATCH[2]}"
+         else return 1; fi
+         a=$((10#$a)); b=$((10#$b))   # "08" no es octal
+         (( a >= 1 && b >= a && b <= n )) || return 1
+         for ((i = a; i <= b; i++)); do sel+=("$i"); done
+       done ;;
+  esac
+  printf '%s\n' "${sel[@]}" | sort -nu | tr '\n' ' ' | sed 's/ $//'
+}
+
+# Muestra la lista y pide qué instancias usar (3 intentos). Imprime los índices (0..n-1).
+# Retorna 1 si se rinde y 3 si el usuario cancela con Enter.
+inst_select() {
+  local tries=0 ans sel rc i
+  {
+    echo "Instancias:"
+    for i in "${!INST_DIRS[@]}"; do
+      printf '  %d) %-14s %s  (%s)\n' "$((i + 1))" "${INST_ALIASES[i]}" "$(inst_name "${INST_ALIASES[i]}")" "$(inst_state "${INST_ALIASES[i]}")"
+    done
+  } >&2
+  while (( tries < 3 )); do
+    ans="$(inst_prompt "¿Cuáles? (ej.: 1 3, 1-3 o todas; Enter cancela): ")"
+    rc=0; sel="$(inst_parse_selection "$ans" "${#INST_DIRS[@]}")" || rc=$?
+    case "$rc" in
+      0) for i in $sel; do echo "$((i - 1))"; done; return 0 ;;
+      2) return 3 ;;
+      *) echo "Selección inválida: '$ans'." >&2; tries=$((tries + 1)) ;;
+    esac
+  done
+  echo "${c_err}[error]${c_off} Demasiados intentos inválidos." >&2
+  return 1
+}
+
+# ---------------------------------------------------------------- ejecución
+# inst_run <comando> <índice...>   (argumentos extra en RUN_EXTRA): en orden, sigue si una falla.
+inst_run() {
+  local cmd="$1" idx n total i fails=0 rf label name
+  shift
+  total=$#
+  local -a results=()
+  n=0
+  for idx in "$@"; do
+    n=$((n + 1))
+    (( total > 1 )) && info "[$n/$total] $(inst_name "${INST_ALIASES[idx]}"): setup.sh $cmd"
+    name="$(inst_name "${INST_ALIASES[idx]}")"
+    rf="$(mktemp)"; : > "$rf"
+    # Entorno limpio: nada del shell de quien llama debe alterar la instancia (cada carpeta usa su .env).
+    # Las comandos de "varias" no deben leer del teclado (una instancia no puede colgar el lote): stdin cerrado.
+    if ( cd "${INST_DIRS[idx]}" && { [[ "${RUN_NOSTDIN:-false}" == true ]] && exec </dev/null; true; } \
+           && env -u AIWS_INSTANCE -u AIWS_NAME -u AIWS_VOL_PREFIX -u ENV_FILE -u TS_HOSTNAME \
+           -u AIWS_HOSTNAME -u MEM_LIMIT -u CPUS -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES \
+           AIWS_UPGRADE_RESULT_FILE="$rf" bash ./setup.sh "$cmd" ${RUN_PRE[@]+"${RUN_PRE[@]}"} ${RUN_EXTRA[@]+"${RUN_EXTRA[@]}"} ); then
+      label="ok"
+      case "$(cat "$rf" 2>/dev/null)" in
+        updated)  label="ok (actualizada)" ;;
+        uptodate) label="ok (ya al día)" ;;
+      esac
+      results+=("  ${c_ok}${label}${c_off}  $name")
+    else
+      results+=("  ${c_err}fallo${c_off}  $name"); fails=$((fails + 1))
+    fi
+    rm -f "$rf"
+  done
+  if (( total > 1 )); then
+    echo; echo "Resumen de '$cmd':"
+    for i in "${results[@]}"; do echo "$i"; done
+  fi
+  (( fails == 0 ))
+}
+
+cmd_multi() {
+  local cmd="$1" kind="$2" all=false yes=false a idx
+  shift 2
+  local -a names=() chosen=()
+  RUN_EXTRA=(); RUN_PRE=(); RUN_NOSTDIN=true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) all=true; shift ;;
+      -y|--yes) if [[ "$kind" == multi-build ]]; then yes=true; shift; else die "Opción desconocida '$1' para aiws $cmd."; fi ;;
+      --)    shift; RUN_EXTRA=("$@"); break ;;
+      -*)    die "Opción desconocida '$1'. Para pasar opciones a setup.sh usa --: aiws $cmd ALIAS -- $1" ;;
+      *)     names+=("$1"); shift ;;
+    esac
+  done
+  if [[ "$all" == true && ${#names[@]} -gt 0 ]]; then
+    die "No mezcles --all con alias: usa --all, o solo los alias que quieras."
+  fi
+  inst_discover
+  (( ${#INST_DIRS[@]} > 0 )) || die "No hay instancias de ai-workspace en este servidor."
+
+  if [[ "$all" == true ]]; then
+    for idx in "${!INST_DIRS[@]}"; do chosen+=("$idx"); done
+  elif (( ${#names[@]} > 0 )); then
+    for a in "${names[@]}"; do idx="$(inst_resolve "$a")" || return 1; chosen+=("$idx"); done   # valida todo antes de ejecutar
+  elif [[ "$kind" == multi-ro ]]; then
+    for idx in "${!INST_DIRS[@]}"; do chosen+=("$idx"); done
+  elif inst_have_tty; then
+    local rc=0 sel
+    sel="$(inst_select)" || rc=$?
+    if (( rc == 3 )); then info "Cancelado."; return 0; fi
+    (( rc == 0 )) || return 1
+    for idx in $sel; do chosen+=("$idx"); done
+  else
+    die "Sin terminal interactiva: indica los alias (aiws $cmd santiago maria) o usa --all."
+  fi
+  # Sin repetidos (aiws upgrade 2 2 principal default), conservando el orden
+  local -a uniq=(); local u dup
+  for idx in "${chosen[@]}"; do
+    dup=false
+    for u in ${uniq[@]+"${uniq[@]}"}; do [[ "$u" == "$idx" ]] && dup=true; done
+    [[ "$dup" == true ]] || uniq+=("$idx")
+  done
+  if [[ "$kind" == multi-build ]]; then
+    local list="" verb ans
+    for idx in "${uniq[@]}"; do list+="${list:+, }${INST_ALIASES[idx]}"; done
+    if [[ "$cmd" == upgrade ]]; then verb="actualizarán y reconstruirán"; RUN_PRE=(--yes); else verb="reconstruirán (sin caché)"; fi
+    if [[ "$yes" != true ]]; then
+      if ! inst_have_tty; then
+        echo "${c_err}[error]${c_off} Sin terminal interactiva: agrega --yes para ejecutar 'aiws $cmd' sin confirmar." >&2
+        return 2
+      fi
+      ans="$(inst_prompt "Se $verb: $list. ¿Continuar? [s/N]: ")"
+      case "$ans" in s|S|y|Y|si|SI|Si|sí) ;; *) info "Cancelado."; return 0 ;; esac
+    fi
+  fi
+  inst_run "$cmd" "${uniq[@]}"
+}
+
+cmd_single() {
+  local cmd="$1" kind="$2" idx a
+  shift 2
+  inst_discover
+  (( ${#INST_DIRS[@]} > 0 )) || die "No hay instancias de ai-workspace en este servidor."
+  if [[ $# -eq 0 || "$1" == -* ]]; then
+    die "'$cmd' trabaja con una sola instancia: indica su alias (aiws $cmd <alias>). Para ver cuáles hay: aiws ls"
+  fi
+  idx="$(inst_resolve "$1")" || return 1
+  shift
+  for a in "$@"; do
+    if [[ "$kind" == destructive && "$a" != -* ]] || { [[ "$a" != -* ]] && inst_resolve "$a" >/dev/null 2>&1; }; then
+      die "'$cmd' trabaja con una sola instancia a la vez (se recibió '$a' además del alias)."
+    fi
+  done
+  RUN_EXTRA=("$@"); RUN_PRE=(); RUN_NOSTDIN=false   # interactivos: heredan el teclado (confirmaciones de setup.sh)
+  inst_run "$cmd" "$idx"
+}
+
+# ------------------------------------------------------------------ recursos
+# Datos del servidor (AIWS_HOST_MEM_KB / AIWS_HOST_CPUS permiten fijarlos, p. ej. en pruebas)
+inst_host_mem_kb() {
+  if [[ -n "${AIWS_HOST_MEM_KB:-}" ]]; then echo "$AIWS_HOST_MEM_KB"; return 0; fi
+  awk '/^MemTotal:/ { print $2; f = 1 } END { if (!f) print 0 }' /proc/meminfo 2>/dev/null || echo 0
+}
+inst_host_cpus() {
+  if [[ -n "${AIWS_HOST_CPUS:-}" ]]; then echo "$AIWS_HOST_CPUS"; return 0; fi
+  nproc 2>/dev/null || echo 1
+}
+
+# Línea de totales: suma de los límites de TODAS las instancias frente al servidor; avisa si no caben
+inst_totals() {
+  local i mem cpus sum tcpu hostg
+  local -a mems=() cpuv=()
+  for i in "${!INST_DIRS[@]}"; do
+    mems+=("$(inst_env "${INST_DIRS[i]}" MEM_LIMIT 8g)"); cpuv+=("$(inst_env "${INST_DIRS[i]}" CPUS 4)")
+  done
+  sum="$(inst_sum_mem "${mems[@]}")"
+  tcpu="$(printf '%s\n' "${cpuv[@]}" | awk '{ s+=$1 } END { printf "%g", s }')"
+  hostg="$(awk -v k="$(inst_host_mem_kb)" 'BEGIN { printf "%.0fg", k / 1048576 }')"
+  echo
+  echo "Suma de límites: $sum de memoria y $tcpu CPUs (${#INST_DIRS[@]} instancia(s)). Son máximos, no son reservas."
+  echo "Servidor: $hostg de RAM y $(inst_host_cpus) CPUs."
+  if awk -v s="${sum%g}" -v k="$(inst_host_mem_kb)" 'BEGIN { exit !(k > 0 && s * 1048576 > k) }'; then
+    warn "La suma de límites ($sum) supera la RAM del servidor ($hostg). Son topes, no reservas: solo hay problema si varias instancias los usan a la vez."
+  fi
+}
+
+# Tabla de límites y uso real (docker stats) de las instancias indicadas (índices)
+resources_table() {
+  local idx a n st usage mu cu mem cpus shm pids d
+  printf '%-14s %-17s %-8s %-10s %-6s %-7s %-7s %s\n' ALIAS ESTADO "MEM LÍM" "MEM USO" CPUS "CPU %" SHM PIDS
+  for idx in "$@"; do
+    a="${INST_ALIASES[idx]}"; d="${INST_DIRS[idx]}"; n="$(inst_name "$a")"; st="$(inst_state "$a")"
+    mu="-"; cu="-"
+    if [[ "$st" == running ]] && usage="$(docker stats --no-stream --format '{{.MemUsage}}|{{.CPUPerc}}' "$n" 2>/dev/null)" && [[ -n "$usage" ]]; then
+      mu="${usage%% / *}"; cu="${usage##*|}"
+    fi
+    mem="$(inst_env "$d" MEM_LIMIT 8g)"; cpus="$(inst_env "$d" CPUS 4)"
+    shm="$(inst_env "$d" SHM_SIZE 2gb)"; pids="$(inst_env "$d" PIDS_LIMIT 2048)"
+    printf '%-14s %-17s %-8s %-10s %-6s %-7s %-7s %s\n' "$a" "$st" "$mem" "$mu" "$cpus" "$cu" "$shm" "$pids"
+  done
+  inst_totals
+}
+
+cmd_resources() {
+  local all=false setmode=false a idx w
+  local -a names=() flags=() chosen=()
+  RUN_EXTRA=(); RUN_PRE=(); RUN_NOSTDIN=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) all=true; shift ;;
+      --mem|--cpus|--shm|--pids|--mssql-mem)
+             [[ $# -ge 2 && "$2" != -* ]] || die "Falta el valor de $1 (ej.: aiws resources santiago $1 4g)."
+             setmode=true; flags+=("$1" "$2"); shift 2 ;;
+      --mem=*|--cpus=*|--shm=*|--pids=*|--mssql-mem=*|--no-apply|--set)
+             setmode=true; flags+=("$1"); shift ;;
+      -*)    die "Opción desconocida '$1'. Para ver las opciones: aiws help resources" ;;
+      *)     names+=("$1"); shift ;;
+    esac
+  done
+  inst_discover
+  for w in ${INST_WARN[@]+"${INST_WARN[@]}"}; do warn "$w"; done
+  (( ${#INST_DIRS[@]} > 0 )) || die "No hay instancias de ai-workspace en este servidor."
+
+  if [[ "$setmode" == true ]]; then
+    if [[ "$all" == true || ${#names[@]} -ne 1 ]]; then
+      die "Para cambiar límites indica una sola instancia (aiws resources <alias> --mem 4g --cpus 2); no se aceptan --all ni varios alias."
+    fi
+    idx="$(inst_resolve "${names[0]}")" || return 1
+    RUN_EXTRA=("${flags[@]}")
+    inst_run resources "$idx"
+    return
+  fi
+
+  if [[ "$all" == true && ${#names[@]} -gt 0 ]]; then die "No mezcles --all con alias: usa --all, o solo los alias que quieras."; fi
+  if (( ${#names[@]} == 0 )); then
+    for idx in "${!INST_DIRS[@]}"; do chosen+=("$idx"); done
+  else
+    for a in "${names[@]}"; do idx="$(inst_resolve "$a")" || return 1; chosen+=("$idx"); done
+  fi
+  resources_table "${chosen[@]}"
+}
+
+# --------------------------------------------------------------------- main
+main() {
+  local cmd="${1:-ls}" kind a
+  [[ $# -gt 0 ]] && shift
+  case "$cmd" in -h|--help) cmd=help ;; esac
+
+  if [[ "$cmd" == install ]]; then
+    echo "${c_err}[error]${c_off} 'install' no se hace con aiws: usa install.sh (curl ... | bash)." >&2
+    return 2
+  fi
+  if ! kind="$(cmd_field "$cmd" 1)"; then
+    echo "${c_err}[error]${c_off} Comando desconocido: $cmd" >&2
+    show_help >&2
+    return 2
+  fi
+  if [[ "$kind" != help ]]; then
+    for a in "$@"; do
+      [[ "$a" == -- ]] && break
+      if [[ "$a" == --help || "$a" == -h ]]; then show_cmd_help "$cmd"; return 0; fi
+    done
+  fi
+
+  case "$kind" in
+    help)
+      if [[ $# -eq 0 ]]; then show_help; return 0; fi
+      if [[ "$1" == --help || "$1" == -h ]]; then show_cmd_help help; return 0; fi
+      if ! cmd_field "$1" 1 >/dev/null; then
+        echo "${c_err}[error]${c_off} Comando desconocido: $1" >&2
+        show_help >&2
+        return 2
+      fi
+      show_cmd_help "$1" ;;
+    ls)                cmd_ls ;;
+    resources)         cmd_resources "$@" ;;
+    multi|multi-ro|multi-build) cmd_multi "$cmd" "$kind" "$@" ;;
+    single|destructive) cmd_single "$cmd" "$kind" "$@" ;;
+  esac
+}
+
+# Con "source aiws" (pruebas) no ejecuta nada; con un enlace en el PATH, BASH_SOURCE[0] == $0.
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

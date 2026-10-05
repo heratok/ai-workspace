@@ -294,7 +294,7 @@ case "$cmd" in
   tunnel)
     cat <<EOF
 Desde tu PC (con Tailscale conectado), abre un túnel SSH y conecta tu cliente a localhost:
-  ssh -N -L 5432:127.0.0.1:$PG_PORT ai@ai-workspace
+  ssh -N -L 5432:127.0.0.1:$PG_PORT ai@${AIWS_HOSTNAME:-ai-workspace}
   -> DBeaver / Power BI / pgAdmin: host=localhost port=5432 user=$PG_USER db=$PG_DB
 EOF
     ;;

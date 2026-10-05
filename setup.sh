@@ -3,11 +3,14 @@
 # ai-workspace - instalador / operador en un solo script
 #
 #   ./setup.sh                       Menú interactivo (instalar, desinstalar, estado...)
-#   ./setup.sh install [--pubkey RUTA.pub|'ssh-ed25519 ...'] [--authkey tskey-auth-...] [--foreground]
+#   ./setup.sh install [--pubkey RUTA.pub|'ssh-ed25519 ...'] [--authkey tskey-auth-...] [--alias NOMBRE] [--mem 4g] [--cpus 2] [--foreground]
 #                                    Pide lo que falte y luego sigue en SEGUNDO PLANO:
 #                                    si se cae SSH, la instalación continúa.
+#                                    --alias: instancia aislada ai-workspace-NOMBRE (varias por servidor;
+#                                    una carpeta = una instancia). Lo normal es crearla con install.sh.
 #   ./setup.sh progress              Ver el progreso / resultado del último proceso
-#   ./setup.sh upgrade               Descarga lo último de GitHub (git), migra y reconstruye
+#   ./setup.sh upgrade [--yes]       Descarga lo último de GitHub (git), migra y reconstruye (--yes: sin preguntas)
+#   ./setup.sh resources [--mem 4g --cpus 2 ...]  Ver límites y uso real, o cambiarlos SIN reconstruir (--set: elegir uno a uno)
 #   ./setup.sh components            Elegir qué agentes/herramientas trae la imagen
 #   ./setup.sh rollback              Vuelve a la versión anterior al último upgrade
 #   ./setup.sh clean [--deep]        Limpia imágenes viejas, logs y respaldos antiguos
@@ -28,13 +31,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-CONTAINER="ai-workspace"
-TS_CONTAINER="ai-workspace-ts"
-TS_VOLUME="ai_ts_state"
 WS_USER="ai"
 ENV_FILE="$SCRIPT_DIR/.env"
 ENV_EXAMPLE="$SCRIPT_DIR/env.example"
-VOLUMES=(ai_home ai_workspace)
 REPO_URL="${AIWS_REPO_URL:-https://github.com/heratok/ai-workspace.git}"
 REPO_BRANCH="${AIWS_REPO_BRANCH:-main}"
 LOG_DIR="$SCRIPT_DIR/logs"            # logs + estado de procesos en segundo plano
@@ -51,12 +50,15 @@ die()  { echo "${c_err}[error]${c_off} $*" >&2; exit 1; }
 trap 'die "falló en la línea $LINENO: $BASH_COMMAND"' ERR
 
 compose() {
-  if [[ -f "$ENV_FILE" ]]; then docker compose --env-file "$ENV_FILE" "$@"; else docker compose "$@"; fi
+  # AIWS_NAME / AIWS_VOL_PREFIX se pasan siempre desde los nombres derivados de esta
+  # instancia, así compose y setup.sh nunca discrepan aunque el .env se edite a mano.
+  local -a envf=(); [[ -f "$ENV_FILE" ]] && envf=(--env-file "$ENV_FILE")
+  AIWS_NAME="$AIWS_NAME" AIWS_VOL_PREFIX="$AIWS_VOL_PREFIX" docker compose ${envf[@]+"${envf[@]}"} "$@"
 }
 
 env_get() {
   [[ -f "$ENV_FILE" ]] || return 0
-  grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true
+  grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2- | tr -d '\r' || true
 }
 # Escritura segura (valores con / & | @ espacios) sin sed
 env_set() {
@@ -78,6 +80,126 @@ env_del() {   # elimina una variable obsoleta del .env
   local tmp; tmp="$(mktemp "$ENV_FILE.XXXX")"
   grep -vE "^$1=" "$ENV_FILE" > "$tmp" || true
   chmod 600 "$tmp"; mv "$tmp" "$ENV_FILE"
+}
+
+# Registro por usuario de las carpetas de instancias (aiws lo lee: una instancia fuera de ~/ai-workspace*
+# deja de tener contenedores tras "down" y, sin esto, desaparecería de la lista).
+registry_file() { echo "${XDG_DATA_HOME:-$HOME/.local/share}/ai-workspace/instances"; }
+registry_add() {
+  local f; f="$(registry_file)"
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+  touch "$f" 2>/dev/null || return 0
+  grep -qxF "$SCRIPT_DIR" "$f" || echo "$SCRIPT_DIR" >> "$f"
+  return 0
+}
+registry_remove() {
+  local f tmp; f="$(registry_file)"
+  [[ -f "$f" ]] || return 0
+  tmp="$(mktemp "$f.XXXX")" || return 0
+  grep -vxF "$SCRIPT_DIR" "$f" > "$tmp" || true
+  mv "$tmp" "$f"
+}
+
+# ------------------------------------------------------------------ instancias
+# Varias instancias aisladas en un mismo servidor: cada una vive en su carpeta y
+# todos sus nombres (proyecto compose, contenedores, volúmenes, imagen) derivan
+# del alias guardado en .env (AIWS_INSTANCE). Sin alias = instancia principal,
+# con los nombres de siempre (ai-workspace, ai_home...), sin migrar nada.
+ALIAS_RE='^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$'
+
+# alias_error <alias>: imprime el motivo y devuelve 1 si el alias no es válido
+alias_error() {
+  local a="$1"
+  if [[ ! "$a" =~ $ALIAS_RE ]]; then
+    echo "Alias inválido '$a': usa 1 a 20 caracteres entre a-z, 0-9 y '-' (sin empezar ni terminar en '-')."
+    return 1
+  fi
+  # Estos nombres chocarían con los contenedores auxiliares (-ts, -mssql) o con restos de versiones viejas
+  case "$a" in
+    ts|mssql|postgres|redis|*-ts|*-mssql)
+      echo "Alias reservado '$a': evita ts, mssql, postgres, redis y los terminados en -ts o -mssql."
+      return 1 ;;
+  esac
+  return 0
+}
+
+# instance_names <alias>: fija todos los nombres de la instancia ("" o "default" = principal)
+instance_names() {
+  local a="${1:-}" msg
+  [[ "$a" == default ]] && a=""
+  if [[ -n "$a" ]]; then msg="$(alias_error "$a")" || die "$msg"; fi
+  INSTANCE="$a"
+  if [[ -z "$a" ]]; then AIWS_NAME="ai-workspace"; AIWS_VOL_PREFIX="ai"
+  else AIWS_NAME="ai-workspace-$a"; AIWS_VOL_PREFIX="ai-workspace-$a"; fi
+  CONTAINER="$AIWS_NAME"
+  TS_CONTAINER="$AIWS_NAME-ts"
+  MSSQL_CONTAINER="$AIWS_NAME-mssql"
+  IMAGE="$AIWS_NAME:latest"
+  TS_VOLUME="${AIWS_VOL_PREFIX}_ts_state"
+  VOLUMES=("${AIWS_VOL_PREFIX}_home" "${AIWS_VOL_PREFIX}_workspace")
+  ALL_VOLUMES=("${VOLUMES[@]}" "${AIWS_VOL_PREFIX}_ssh_host_keys" "$TS_VOLUME" "${AIWS_VOL_PREFIX}_mssql_data")
+}
+instance_names "$(env_get AIWS_INSTANCE)"
+
+# Guarda la identidad de la instancia en .env (idempotente). Para alias, el nombre
+# en la tailnet (TS_HOSTNAME) deja de ser el genérico, salvo que el usuario lo haya cambiado.
+write_instance_env() {
+  env_set AIWS_INSTANCE "$INSTANCE"
+  env_set AIWS_NAME "$AIWS_NAME"
+  env_set AIWS_VOL_PREFIX "$AIWS_VOL_PREFIX"
+  if [[ -n "$INSTANCE" ]]; then
+    local h; h="$(env_get TS_HOSTNAME)"
+    if [[ -z "$h" || "$h" == ai-workspace ]]; then env_set TS_HOSTNAME "$AIWS_NAME"; fi
+  fi
+}
+
+# --alias: una carpeta = una instancia. Solo se rechaza si esta carpeta ya tiene la suya:
+# su .env guarda otro alias, o ella gestiona los contenedores de la instancia actual.
+# (Un clon nuevo con la principal instalada en otra carpeta sí puede crear una instancia.)
+bind_alias() {
+  local want="${1:-}" msg owner
+  [[ "$want" == default ]] && want=""
+  if [[ -n "$want" ]]; then msg="$(alias_error "$want")" || die "$msg"; fi
+  [[ "$want" == "$INSTANCE" ]] && return 0
+  owner="$(container_owner "$CONTAINER")"
+  if [[ -n "$INSTANCE" ]] || { [[ -n "$owner" ]] && same_dir "$owner" "$SCRIPT_DIR"; }; then
+    die "Esta carpeta ya es la instancia '${INSTANCE:-principal}' ($CONTAINER). Para otra instancia usa otra carpeta: install.sh --alias ${want:-default}"
+  fi
+  instance_names "$want"
+}
+
+# Dueño (carpeta de compose) de un contenedor; vacío si no existe o no es de compose
+container_owner() {
+  docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$1" 2>/dev/null || true
+}
+
+same_dir() { [[ "$(readlink -f "$1" 2>/dev/null || echo "$1")" == "$(readlink -f "$2" 2>/dev/null || echo "$2")" ]]; }
+
+# Evita pisar una instancia gestionada desde otra carpeta. Si la carpeta dueña registrada ya
+# no existe (la moviste), solo avisa: sigue siendo la misma instancia.
+check_instance_owner() {
+  local c owner
+  for c in "$CONTAINER" "$TS_CONTAINER"; do
+    docker container inspect "$c" >/dev/null 2>&1 || continue
+    owner="$(container_owner "$c")"
+    if [[ -n "$owner" ]]; then
+      same_dir "$owner" "$SCRIPT_DIR" && continue
+      [[ -d "$owner" ]] && die "El contenedor $c lo gestiona otra carpeta ($owner). Usa esa carpeta, o elige otro alias: install.sh --alias OTRO"
+    elif [[ -n "$INSTANCE" ]]; then
+      die "El contenedor $c ya existe y no lo gestiona ninguna carpeta conocida. Elige otro alias: install.sh --alias OTRO"
+    fi
+    warn "El contenedor $c figura en ${owner:-otro origen}, no en esta carpeta. Si moviste la carpeta, sigue siendo la misma instancia."
+  done
+  return 0
+}
+
+# Nombres (AIWS_NAME) de las demás instancias del servidor, una por línea
+other_instances() {
+  {
+    docker ps -a --filter label=org.ai-workspace.instance --format '{{.Label "org.ai-workspace.instance"}}' 2>/dev/null || true
+    # La principal instalada antes de las etiquetas no tiene ninguna
+    docker container inspect ai-workspace-ts >/dev/null 2>&1 && echo ai-workspace
+  } | sort -u | grep -vxF -e "$AIWS_NAME" -e '' || true
 }
 
 # ------------------------------------------------------------- verificaciones
@@ -132,18 +254,21 @@ ts_logged_in_before() {
 }
 
 configure_env() {
-  local authkey="${1:-}"
+  local authkey="${1:-}" is_new=false
 
   if [[ ! -f "$ENV_FILE" ]]; then
+    is_new=true
     [[ -f "$ENV_EXAMPLE" ]] || die "Falta env.example"
     cp "$ENV_EXAMPLE" "$ENV_FILE"; chmod 600 "$ENV_FILE"
     info ".env creado desde env.example"
-    if [[ -t 0 ]]; then
+    if has_tty; then
       local mode; read -rp "¿Instalación completa (recomendada) o personalizada? [C/p]: " mode || true
       if [[ "$mode" =~ ^[pP] ]]; then choose_components || true; fi
     fi
   fi
 
+  write_instance_env
+  size_resources "$is_new"
   [[ -n "$authkey" ]] && env_set TS_AUTHKEY "$authkey"
 
   if ! ts_logged_in_before && [[ -z "$(env_get TS_AUTHKEY)" ]]; then
@@ -165,7 +290,7 @@ EOF
     die "TS_AUTHKEY no parece válida (debe empezar con 'tskey-'). Ejecuta install de nuevo."
   fi
   ensure_secrets
-  info "Configuración lista en .env (TS_HOSTNAME=$(env_get TS_HOSTNAME), servicios: $(env_get COMPOSE_PROFILES))"
+  info "Configuración lista en .env (instancia $AIWS_NAME, TS_HOSTNAME=$(env_get TS_HOSTNAME), servicios: $(env_get COMPOSE_PROFILES))"
 }
 
 create_volumes() {
@@ -308,11 +433,12 @@ default_pubkey() {
 doctor() { docker exec -u "$WS_USER" "$CONTAINER" zsh -lc ws-doctor; }
 
 summary() {
-  local host ip profiles; host="$(env_get TS_HOSTNAME)"; host="${host:-ai-workspace}"; ip="$(ts_ip)"
+  local host ip profiles others; host="$(env_get TS_HOSTNAME)"; host="${host:-$AIWS_NAME}"; ip="$(ts_ip)"
   profiles="$(env_get COMPOSE_PROFILES)"
   cat <<EOF
 
 ${c_ok}Listo.${c_off} Accesible SOLO desde tu tailnet (nada publicado en el servidor).
+  Instancia: ${AIWS_NAME}${INSTANCE:+  (alias: $INSTANCE)}   Carpeta: ${SCRIPT_DIR}
   Equipo: ${host}  (IP Tailscale: ${ip:-?})
   SSH   : ssh ${WS_USER}@${host}
   Mosh  : mosh -p 60000:60010 ${WS_USER}@${host}
@@ -321,10 +447,16 @@ ${c_ok}Listo.${c_off} Accesible SOLO desde tu tailnet (nada publicado en el serv
   Extra    : ${profiles:-ninguno}   (mssql = SQL Server en contenedor aparte)
   GitHub   : dentro del workspace ejecuta  gh auth login  (queda guardado en el volumen)
   Diagnóstico: ./setup.sh doctor   |   Estado Tailscale: ./setup.sh ts-status
+  Instancias : aiws ls  (gestiona todas desde el servidor)   |   Ayuda: aiws help
 EOF
+  others="$(other_instances | tr '\n' ' ')"
+  if [[ -n "${others// /}" ]]; then
+    warn "Hay otras instancias en este servidor: ${others}"
+    warn "MEM_LIMIT ($(env_get MEM_LIMIT || true)) y CPUS de cada instancia se suman: revisa que el total quepa en el servidor."
+  fi
 }
 
-usage() { sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ------------------------------------------------------------ segundo plano
 # Lo interactivo (auth key, clave SSH) se pregunta ANTES; lo largo (build) corre
@@ -393,8 +525,9 @@ report_status() {
   if bg_running; then info "Sigue en curso (PID $(cat "$PID_FILE")). ./setup.sh progress"; return 0; fi
   [[ -f "$STATUS_FILE" ]] || return 0
   local rc; rc="$(cat "$STATUS_FILE")"
-  if [[ "$rc" == 0 ]]; then info "Último proceso: terminó correctamente."
-  else echo "${c_err}[error]${c_off} Último proceso terminó con error (código $rc). Revisa: logs/latest.log" >&2; fi
+  if [[ "$rc" == 0 ]]; then info "Último proceso: terminó correctamente."; return 0; fi
+  echo "${c_err}[error]${c_off} Último proceso terminó con error (código $rc). Revisa: logs/latest.log" >&2
+  exit "$rc"   # el estado real llega al llamador (aiws, scripts); exit evita el aviso genérico del trap ERR
 }
 
 # Clave SSH: se recoge en primer plano y se aplica al final del proceso en segundo plano
@@ -437,11 +570,291 @@ install_steps() {
   else
     warn "Sin clave SSH autorizada. Agrégala con: ./setup.sh add-key"
   fi
+  install_aiws_link || true
   doctor || warn "ws-doctor reportó problemas (revisa arriba)."
   summary
 }
 
-update_steps() { run_migrations; build_and_up --no-cache; clean; doctor || true; }
+update_steps() { run_migrations; build_and_up --no-cache; clean; doctor || true; install_aiws_link || true; }
+
+# Deja "aiws" en el PATH: enlace al aiws de este clon, en /usr/local/bin si se puede escribir ahí
+# y si no en ~/.local/bin. Cualquier clon sirve (aiws descubre todas las instancias), así que un
+# enlace existente a otro clon se respeta salvo que su destino ya no exista.
+is_writable() { [[ -w "$1" ]]; }
+
+# Avisa si aiws queda dentro de /root: otros usuarios del servidor no podrán usarlo
+warn_root_clone() {
+  if [[ "$(id -u)" == 0 && "$SCRIPT_DIR" == /root/* ]]; then
+    warn "Este clon está en $SCRIPT_DIR: otros usuarios del servidor no podrán ejecutar aiws. Para compartirlo, clona en una ruta común (ej.: AIWS_DIR=/opt/ai-workspace)."
+  fi
+  return 0
+}
+
+install_aiws_link() {
+  local src="$SCRIPT_DIR/aiws" sys="${AIWS_SYSTEM_BIN:-/usr/local/bin}" dir link target=""
+  [[ -f "$src" ]] || return 0
+  chmod +x "$src" 2>/dev/null || true
+  # 1) un enlace vivo (a este u otro clon) se respeta; uno roto se rehace si se puede escribir
+  for dir in "$sys" "$HOME/.local/bin"; do
+    link="$dir/aiws"
+    if [[ -L "$link" ]]; then
+      [[ -e "$link" ]] && return 0
+      if is_writable "$dir"; then ln -sfn "$src" "$link" && info "Enlace de aiws reparado: $link" && warn_root_clone; return 0; fi
+      warn "El enlace $link está roto y no puedo escribir en $dir; pruebo con otra carpeta."
+    elif [[ -e "$link" ]]; then
+      warn "Ya existe $link y no es un enlace: no lo toco."
+    elif [[ -z "$target" ]] && { is_writable "$dir" || [[ "$dir" == "$HOME/.local/bin" ]]; }; then
+      target="$dir"                                  # primera carpeta libre y utilizable
+    fi
+  done
+  [[ -n "$target" ]] || { warn "No encontré dónde instalar aiws. Enlázalo a mano: ln -s $src ~/.local/bin/aiws"; return 0; }
+  mkdir -p "$target" 2>/dev/null || true
+  ln -s "$src" "$target/aiws" || { warn "No pude crear el enlace de aiws en $target."; return 0; }
+  info "Comando aiws instalado en $target/aiws (gestiona todas las instancias: aiws help)"
+  if [[ ":$PATH:" != *":$target:"* ]]; then
+    warn "$target no está en tu PATH. Agrégalo con:  echo 'export PATH=\"$target:\$PATH\"' >> ~/.bashrc  y abre una sesión nueva."
+  fi
+  warn_root_clone
+}
+
+# ------------------------------------------------------------ recursos por instancia
+# MEM_LIMIT, CPUS, SHM_SIZE, PIDS_LIMIT y MSSQL_MEM_LIMIT son topes por instancia (no reservas).
+# Se cambian sin reconstruir: "resources" los escribe en .env y recrea solo los contenedores de esta instancia.
+SIZE_MEM=""; SIZE_CPUS=""     # --mem / --cpus de "install"
+
+# Datos del servidor (AIWS_HOST_MEM_KB / AIWS_HOST_CPUS permiten fijarlos, p. ej. en pruebas)
+host_mem_kb() {
+  if [[ -n "${AIWS_HOST_MEM_KB:-}" ]]; then echo "$AIWS_HOST_MEM_KB"; return 0; fi
+  awk '/^MemTotal:/ { print $2; f = 1 } END { if (!f) print 0 }' /proc/meminfo 2>/dev/null || echo 0
+}
+host_cpus() {
+  if [[ -n "${AIWS_HOST_CPUS:-}" ]]; then echo "$AIWS_HOST_CPUS"; return 0; fi
+  nproc 2>/dev/null || echo 1
+}
+
+ask_value() { local a=""; read -rp "$1" a || true; echo "$a"; }
+
+# 512m, 4g, 1.5g, 4gb (sin distinguir mayúsculas) -> megabytes enteros; falla si no es un tamaño
+mem_to_mb() {
+  local v; v="$(tr 'A-Z' 'a-z' <<<"$1")"; v="${v%b}"
+  [[ "$v" =~ ^[0-9]+(\.[0-9]+)?[mg]$ ]] || return 1
+  awk -v n="${v%[mg]}" -v u="${v: -1}" 'BEGIN { printf "%d\n", (u == "g" ? n * 1024 : n) }'
+}
+
+# res_check <VARIABLE> <valor>: valida y deja el valor normalizado en RES_VALUE.
+# Errores a stderr (devuelve 1); avisos con warn, que no bloquean.
+res_check() {
+  local key="$1" v="$2" mb cpus
+  RES_VALUE=""
+  case "$key" in
+    MEM_LIMIT|MSSQL_MEM_LIMIT)
+      mb="$(mem_to_mb "$v")" || { echo "$key inválido '$v': usa un tamaño como 512m, 4g o 1.5g." >&2; return 1; }
+      (( mb >= 1024 )) || { echo "$key demasiado bajo ($v): el mínimo es 1g." >&2; return 1; }
+      if (( mb < 2048 )); then
+        if [[ "$key" == MEM_LIMIT ]]; then warn "Con menos de 2g Chromium/Playwright y las compilaciones pueden quedarse sin memoria."
+        else warn "SQL Server necesita alrededor de 2g para funcionar con comodidad."; fi
+      fi
+      RES_VALUE="$(tr 'A-Z' 'a-z' <<<"$v")"; RES_VALUE="${RES_VALUE%b}" ;;
+    SHM_SIZE)
+      mb="$(mem_to_mb "$v")" || { echo "SHM_SIZE inválido '$v': usa un tamaño como 512m o 1g." >&2; return 1; }
+      (( mb > 0 )) || { echo "SHM_SIZE debe ser mayor que 0." >&2; return 1; }
+      RES_VALUE="$(tr 'A-Z' 'a-z' <<<"$v")"; RES_VALUE="${RES_VALUE%b}" ;;
+    CPUS)
+      [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "CPUS inválido '$v': usa un número positivo (ej.: 2 o 1.5)." >&2; return 1; }
+      cpus="$(host_cpus)"
+      awk -v c="$v" 'BEGIN { exit !(c > 0) }' || { echo "CPUS debe ser mayor que 0." >&2; return 1; }
+      awk -v c="$v" -v m="$cpus" 'BEGIN { exit !(c <= m) }' || { echo "CPUS ($v) supera las $cpus CPUs del servidor." >&2; return 1; }
+      RES_VALUE="$v" ;;
+    PIDS_LIMIT)
+      [[ "$v" =~ ^[0-9]+$ ]] || { echo "PIDS_LIMIT inválido '$v': usa un entero." >&2; return 1; }
+      (( v >= 256 )) || { echo "PIDS_LIMIT demasiado bajo ($v): el mínimo es 256." >&2; return 1; }
+      RES_VALUE="$v" ;;
+    *) echo "Variable de recursos desconocida: $key" >&2; return 1 ;;
+  esac
+}
+
+# Carpetas de las demás instancias de este servidor (registro + clones ~/ai-workspace* con .env), sin la propia
+other_instance_dirs() {
+  local reg d canon self seen=""
+  reg="$(registry_file)"; self="$(readlink -f "$SCRIPT_DIR" 2>/dev/null || echo "$SCRIPT_DIR")"
+  while IFS= read -r d; do
+    [[ -n "$d" && -f "$d/.env" ]] || continue
+    canon="$(readlink -f "$d" 2>/dev/null || echo "$d")"
+    [[ "$canon" == "$self" || "$seen" == *"|$canon|"* ]] && continue
+    seen+="|$canon|"; echo "$d"
+  done < <({ [[ -f "$reg" ]] && cat "$reg"; for d in "$HOME"/ai-workspace "$HOME"/ai-workspace-*; do [[ -f "$d/.env" ]] && echo "$d"; done; true; })
+}
+
+# Cuántas instancias hay ya además de esta (carpetas conocidas o contenedores)
+existing_instance_count() {
+  local dirs conts
+  dirs="$(other_instance_dirs | wc -l | tr -d ' ')"; conts="$(other_instances | wc -l | tr -d ' ')"
+  (( dirs > conts )) && echo "$dirs" || echo "$conts"
+}
+
+# Sugerencia de MEM_LIMIT: (RAM - 2g para el servidor) / (existentes + 1), entre 2g y 8g, en g enteros
+suggest_mem() {
+  local n="${1:-0}" kb per
+  kb="$(host_mem_kb)"
+  per=$(( (kb - 2 * 1048576) / (n + 1) / 1048576 ))
+  (( per > 8 )) && per=8
+  (( per < 2 )) && per=2
+  echo "${per}g"
+}
+suggest_mem_is_tiny() {   # ¿ni siquiera caben 2g por instancia?
+  local n="${1:-0}" kb; kb="$(host_mem_kb)"
+  (( (kb - 2 * 1048576) / (n + 1) / 1048576 < 2 ))
+}
+suggest_cpus() { local c; c="$(host_cpus)"; (( c > 4 )) && c=4; echo "$c"; }
+
+# Suma de MEM_LIMIT (en MB) de esta instancia (con el valor dado) y de las demás
+sum_mem_limits_mb() {
+  local own="${1:-$(env_get MEM_LIMIT)}" d v total=0 mb
+  mb="$(mem_to_mb "${own:-8g}" || echo 0)"; total=$((total + mb))
+  while IFS= read -r d; do
+    v="$(grep -E '^MEM_LIMIT=' "$d/.env" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+    mb="$(mem_to_mb "${v:-8g}" || echo 0)"; total=$((total + mb))
+  done < <(other_instance_dirs)
+  echo "$total"
+}
+warn_mem_over_host() {
+  local total host_mb; total="$(sum_mem_limits_mb "${1:-}")"; host_mb=$(( $(host_mem_kb) / 1024 ))
+  if (( host_mb > 0 && total > host_mb )); then
+    warn "La suma de MEM_LIMIT de las instancias ($((total / 1024))g) supera la RAM del servidor ($((host_mb / 1024))g). Son topes, no reservas: solo hay problema si varias instancias los usan a la vez."
+  fi
+  return 0
+}
+
+# Pregunta un valor con una sugerencia por defecto (3 intentos; si no, usa la sugerencia)
+ask_res() {   # ask_res <VARIABLE> <etiqueta> <sugerido>: imprime el valor elegido
+  local key="$1" label="$2" sug="$3" ans tries=0
+  while (( tries < 3 )); do
+    ans="$(ask_value "$label [$sug]: ")"; ans="${ans//[[:space:]]/}"; ans="${ans:-$sug}"
+    if res_check "$key" "$ans" >&2; then echo "$RES_VALUE"; return 0; fi
+    tries=$((tries + 1))
+  done
+  warn "Demasiados intentos inválidos: uso el valor sugerido ($sug)." ; echo "$sug"
+}
+
+# Dimensiona una instancia al instalar. Lo indicado con --mem/--cpus siempre se aplica; lo demás
+# solo en un .env NUEVO (una instancia existente nunca cambia sus valores sola).
+size_resources() {
+  local is_new="$1" n mem cpus sm sc
+  if [[ -n "$SIZE_MEM" ]]; then res_check MEM_LIMIT "$SIZE_MEM" || die "--mem inválido."; env_set MEM_LIMIT "$RES_VALUE"; fi
+  if [[ -n "$SIZE_CPUS" ]]; then res_check CPUS "$SIZE_CPUS" || die "--cpus inválido."; env_set CPUS "$RES_VALUE"; fi
+  [[ "$is_new" == true ]] || return 0
+  n="$(existing_instance_count)"; sm="$(suggest_mem "$n")"; sc="$(suggest_cpus)"
+  if suggest_mem_is_tiny "$n"; then
+    warn "Este servidor tiene poca memoria para $((n + 1)) instancia(s): sugiero el mínimo (2g). Considera menos instancias o más RAM."
+  fi
+  if [[ -z "$SIZE_MEM" ]]; then
+    if has_tty; then mem="$(ask_res MEM_LIMIT "Memoria máxima" "$sm")"
+    else mem="$sm"; info "Memoria máxima sugerida: $sm (cámbiala después con ./setup.sh resources --mem ...)"; fi
+    env_set MEM_LIMIT "$mem"
+  fi
+  if [[ -z "$SIZE_CPUS" ]]; then
+    if has_tty; then cpus="$(ask_res CPUS "CPUs" "$sc")"
+    else cpus="$sc"; info "CPUs sugeridas: $sc (cámbialas después con ./setup.sh resources --cpus ...)"; fi
+    env_set CPUS "$cpus"
+  fi
+  warn_mem_over_host "$(env_get MEM_LIMIT)"
+}
+
+# Límites actuales y uso real de esta instancia
+resources_show() {
+  local mem cpus shm pids mmem usage mu cu hostgb
+  mem="$(env_get MEM_LIMIT)"; cpus="$(env_get CPUS)"; shm="$(env_get SHM_SIZE)"; pids="$(env_get PIDS_LIMIT)"; mmem="$(env_get MSSQL_MEM_LIMIT)"
+  mu="detenida"; cu="detenida"
+  if usage="$(docker stats --no-stream --format '{{.MemUsage}}|{{.CPUPerc}}' "$CONTAINER" 2>/dev/null)" && [[ -n "$usage" ]]; then
+    mu="${usage%%|*}"; cu="${usage##*|}"
+  fi
+  hostgb="$(awk -v k="$(host_mem_kb)" 'BEGIN { printf "%.0fg", k / 1048576 }')"
+  cat <<EOF
+Instancia ${AIWS_NAME}
+  Memoria  : límite ${mem:-8g}   uso ${mu}
+  CPUs     : límite ${cpus:-4}   uso ${cu}
+  /dev/shm : ${shm:-2gb}   Procesos máx.: ${pids:-2048}$(profile_on mssql && echo "   SQL Server: ${mmem:-4g}")
+  Servidor : ${hostgb} de RAM y $(host_cpus) CPUs (los límites son topes, no reservas)
+Cambiar sin reconstruir: ./setup.sh resources --mem 4g --cpus 2   (o --set para elegir uno a uno)
+EOF
+}
+
+# resources [--mem V] [--cpus V] [--shm V] [--pids V] [--mssql-mem V] [--no-apply] [--set]
+resources() {
+  local mem="" cpus="" shm="" pids="" mmem="" apply=true setmode=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mem)        mem="${2:?falta el valor de --mem}"; shift 2 ;;
+      --mem=*)      mem="${1#*=}"; shift ;;
+      --cpus)       cpus="${2:?falta el valor de --cpus}"; shift 2 ;;
+      --cpus=*)     cpus="${1#*=}"; shift ;;
+      --shm)        shm="${2:?falta el valor de --shm}"; shift 2 ;;
+      --shm=*)      shm="${1#*=}"; shift ;;
+      --pids)       pids="${2:?falta el valor de --pids}"; shift 2 ;;
+      --pids=*)     pids="${1#*=}"; shift ;;
+      --mssql-mem)  mmem="${2:?falta el valor de --mssql-mem}"; shift 2 ;;
+      --mssql-mem=*) mmem="${1#*=}"; shift ;;
+      --no-apply)   apply=false; shift ;;
+      --set)        setmode=true; shift ;;
+      *) die "Opción desconocida: $1 (usa --mem, --cpus, --shm, --pids, --mssql-mem, --no-apply o --set)" ;;
+    esac
+  done
+  [[ -f "$ENV_FILE" ]] || die "Esta instancia aún no está instalada (no hay .env): ejecuta ./setup.sh install"
+
+  if [[ "$setmode" == true ]]; then
+    has_tty || die "--set pregunta uno a uno y necesita una terminal; sin ella usa --mem, --cpus, etc."
+    resources_show; echo
+    local cur sug n; n="$(existing_instance_count)"
+    sug="$(suggest_mem "$n")"; cur="$(env_get MEM_LIMIT)"; cur="${cur:-8g}"
+    mem="$(res_prompt MEM_LIMIT "Memoria máxima" "$cur" "$sug")"
+    sug="$(suggest_cpus)"; cur="$(env_get CPUS)"; cur="${cur:-4}"
+    cpus="$(res_prompt CPUS "CPUs" "$cur" "$sug")"
+    cur="$(env_get SHM_SIZE)"; shm="$(res_prompt SHM_SIZE "Memoria compartida (/dev/shm)" "${cur:-2gb}" "2gb")"
+    cur="$(env_get PIDS_LIMIT)"; pids="$(res_prompt PIDS_LIMIT "Máximo de procesos" "${cur:-2048}" "2048")"
+    if profile_on mssql; then cur="$(env_get MSSQL_MEM_LIMIT)"; mmem="$(res_prompt MSSQL_MEM_LIMIT "Memoria de SQL Server" "${cur:-4g}" "4g")"; fi
+  fi
+
+  if [[ -z "$mem$cpus$shm$pids$mmem" ]]; then resources_show; return 0; fi
+
+  # Validar todo antes de escribir nada
+  local k v
+  local -a keys=() vals=()
+  for k in MEM_LIMIT:"$mem" CPUS:"$cpus" SHM_SIZE:"$shm" PIDS_LIMIT:"$pids" MSSQL_MEM_LIMIT:"$mmem"; do
+    v="${k#*:}"; k="${k%%:*}"
+    [[ -n "$v" ]] || continue
+    res_check "$k" "$v" || die "No se cambió nada."
+    keys+=("$k"); vals+=("$RES_VALUE")
+  done
+  local i
+  for i in "${!keys[@]}"; do env_set "${keys[i]}" "${vals[i]}"; info "${keys[i]}=${vals[i]}"; done
+  warn_mem_over_host "$(env_get MEM_LIMIT)"
+  [[ "$apply" == true ]] || { info "Guardado en .env (sin aplicar). Aplícalo con: ./setup.sh resources --mem ... o recreando con compose."; return 0; }
+  resources_apply
+}
+
+# En --set: Enter conserva el valor actual; se muestra también la sugerencia. Imprime el valor o nada si no cambia.
+res_prompt() {   # res_prompt <VARIABLE> <etiqueta> <actual> <sugerido>
+  local key="$1" label="$2" cur="$3" sug="$4" ans tries=0
+  while (( tries < 3 )); do
+    ans="$(ask_value "$label (actual $cur, sugerido $sug) [$cur]: ")"; ans="${ans//[[:space:]]/}"
+    if [[ -z "$ans" || "$ans" == "$cur" ]]; then return 0; fi
+    if res_check "$key" "$ans" >&2; then echo "$RES_VALUE"; return 0; fi
+    tries=$((tries + 1))
+  done
+  warn "Demasiados intentos inválidos: conservo $cur." >&2
+}
+
+# Recrea solo los contenedores de esta instancia con los límites nuevos: segundos, sin reconstruir
+resources_apply() {
+  if ! docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+    info "Guardado. Se aplicará cuando la instancia se instale o se levante."; return 0
+  fi
+  info "Aplicando solo en $AIWS_NAME (se recrean sus contenedores; la imagen no se reconstruye)..."
+  compose up -d --no-build
+  wait_healthy "$TS_CONTAINER"
+  wait_healthy "$CONTAINER"
+  info "Listo."
+}
 
 # ------------------------------------------------------------ componentes
 # Formato: VARIABLE|Nombre|Por defecto|Descripción
@@ -505,7 +918,7 @@ choose_components() {
 components_cmd() {
   [[ -f "$ENV_FILE" ]] || { cp "$ENV_EXAMPLE" "$ENV_FILE"; chmod 600 "$ENV_FILE"; }
   if choose_components; then
-    if docker image inspect ai-workspace:latest >/dev/null 2>&1; then
+    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
       confirm "¿Reconstruir ahora para aplicar los cambios?" && exec bash "$SCRIPT_DIR/setup.sh" update
       info "Aplícalos cuando quieras con: ./setup.sh update"
     fi
@@ -553,12 +966,14 @@ keep_newest() {   # keep_newest <dir> <patrón> <n>: borra los más viejos
 
 clean() {
   local deep=false; [[ "${1:-}" == --deep ]] && deep=true
-  info "Limpiando imágenes viejas de ai-workspace (capas sin etiqueta tras reconstruir)..."
-  docker image prune -f --filter "label=org.ai-workspace.image=true" | tail -n1 || true
+  info "Limpiando imágenes viejas de $AIWS_NAME (capas sin etiqueta tras reconstruir)..."
+  local -a flt=(--filter "label=org.ai-workspace.image=true")
+  [[ -n "$INSTANCE" ]] && flt+=(--filter "label=org.ai-workspace.instance=$AIWS_NAME")   # solo las de esta instancia
+  docker image prune -f "${flt[@]}" | tail -n1 || true
   info "Logs: se conservan los últimos $LOG_KEEP"
   keep_newest "$LOG_DIR" '*-[0-9]*.log' "$LOG_KEEP"
   info "Respaldos: se conservan los últimos $BACKUP_KEEP"
-  keep_newest "$SCRIPT_DIR/backups" 'ai-workspace-*.tar.gz' "$BACKUP_KEEP"
+  keep_newest "$SCRIPT_DIR/backups" "$AIWS_NAME-[0-9]*.tar.gz" "$BACKUP_KEEP"
   if [[ "$deep" == true ]]; then
     warn "Limpieza profunda: caché de build de Docker e imágenes sin uso (afecta a TODO Docker del servidor)."
     if confirm "¿Continuar?"; then
@@ -570,10 +985,35 @@ clean() {
 }
 
 # ------------------------------------------------------------ actualizar desde GitHub
-g() { git -c safe.directory="$SCRIPT_DIR" -C "$SCRIPT_DIR" "$@"; }
+g() { git --no-pager -c safe.directory="$SCRIPT_DIR" -C "$SCRIPT_DIR" "$@"; }
 
+has_tty() { [[ -t 0 ]]; }
+# Reconstruye con el setup.sh recién descargado (proceso nuevo); aparte para poder probar upgrade
+run_update() { exec bash "$SCRIPT_DIR/setup.sh" update "$@"; }
+# aiws pasa AIWS_UPGRADE_RESULT_FILE para saber si la instancia se actualizó o ya estaba al día
+upgrade_result() { if [[ -n "${AIWS_UPGRADE_RESULT_FILE:-}" ]]; then echo "$1" > "$AIWS_UPGRADE_RESULT_FILE" 2>/dev/null || true; fi; return 0; }
+
+# upgrade [--yes|-y] [--rebuild] [--foreground]
+#   --yes         sin preguntas: guarda cambios locales (git stash), actualiza y reconstruye
+#   --rebuild     con --yes, reconstruye aunque ya esté al día
+#   --foreground  se pasa a "update" (sin segundo plano)
+# Sin --yes pregunta cada paso (requiere terminal; sin ella falla en vez de aparentar éxito).
 upgrade() {
+  local yes=false rebuild=false fg=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes|-y)     yes=true ;;
+      --rebuild)    rebuild=true ;;
+      --foreground) fg=(--foreground) ;;
+      *) die "Opción desconocida para upgrade: $1 (usa --yes, --rebuild o --foreground)" ;;
+    esac
+    shift
+  done
   command -v git >/dev/null || die "Falta git en el servidor."
+  if [[ "$yes" != true ]] && ! has_tty; then
+    die "upgrade necesita responder preguntas y no hay terminal: usa ./setup.sh upgrade --yes (actualiza y reconstruye sin preguntar)."
+  fi
+  registry_add
   if bg_running; then warn "Hay una instalación en curso; espera a que termine."; follow; return 0; fi
 
   if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
@@ -583,7 +1023,7 @@ Esta carpeta no viene de git (la copiaste a mano). Se conectará a:
 Se conservan .env, logs/ y backups/. Los archivos del proyecto se reemplazan por los del repo
 (si personalizaste config/packages.apt u otros, guarda una copia antes).
 EOF
-    confirm "¿Continuar?" || { info "Cancelado."; return 0; }
+    if [[ "$yes" != true ]]; then confirm "¿Continuar?" || { info "Cancelado."; return 0; }; fi
     g init -q
     g config core.fileMode false          # chmod +x local no cuenta como "cambio"
     g remote add origin "$REPO_URL" 2>/dev/null || g remote set-url origin "$REPO_URL"
@@ -597,8 +1037,13 @@ EOF
     g fetch -q origin "$REPO_BRANCH" || die "No pude contactar $REPO_URL"
     local behind; behind="$(g rev-list --count "HEAD..origin/$REPO_BRANCH")"
     if [[ "$behind" == 0 ]]; then
-      info "Ya tienes la última versión: $(g log -1 --format='%h %s (%cr)')"
-      confirm "¿Reconstruir de todos modos (actualiza paquetes y herramientas)?" && exec bash "$SCRIPT_DIR/setup.sh" update
+      info "Ya tienes la última versión (ya al día): $(g log -1 --format='%h %s (%cr)')"
+      upgrade_result uptodate
+      if [[ "$yes" == true ]]; then
+        [[ "$rebuild" == true ]] && run_update ${fg[@]+"${fg[@]}"}
+        return 0
+      fi
+      confirm "¿Reconstruir de todos modos (actualiza paquetes y herramientas)?" && run_update ${fg[@]+"${fg[@]}"}
       return 0
     fi
     echo "${c_ok}Cambios nuevos ($behind):${c_off}"
@@ -606,7 +1051,7 @@ EOF
     g diff --stat "HEAD" "origin/$REPO_BRANCH" | tail -n 15
     if [[ -n "$(g status --porcelain --untracked-files=no)" ]]; then
       warn "Tienes cambios locales en archivos del repo:"; g status --short --untracked-files=no
-      confirm "¿Guardarlos aparte (git stash) y actualizar?" || { info "Cancelado."; return 0; }
+      if [[ "$yes" != true ]]; then confirm "¿Guardarlos aparte (git stash) y actualizar?" || { info "Cancelado."; return 0; }; fi
       g stash push -q -m "setup.sh upgrade $(date +%F_%T)"
       info "Tus cambios quedaron guardados: git stash list  (recupéralos con: git stash pop)"
     fi
@@ -614,6 +1059,7 @@ EOF
     g merge -q --ff-only "origin/$REPO_BRANCH" || die "No se pudo actualizar sin conflictos (git status)."
     info "Archivos actualizados a: $(g log -1 --format='%h %s')"
   fi
+  upgrade_result updated
 
   normalize_line_endings
   run_migrations
@@ -629,8 +1075,9 @@ EOF
     if ! grep -qE "^${key}=" "$ENV_FILE"; then echo "$line" >> "$ENV_FILE"; added=$((added+1)); fi
   done < "$ENV_EXAMPLE"
   (( added > 0 )) && info "$added variable(s) nuevas agregadas a .env desde env.example"
-  if confirm "¿Reconstruir ahora la imagen con los cambios? (recomendado)"; then
-    exec bash "$SCRIPT_DIR/setup.sh" update   # proceso nuevo: usa el setup.sh recién descargado
+  if [[ "$yes" == true ]] || confirm "¿Reconstruir ahora la imagen con los cambios? (recomendado)"; then
+    run_update ${fg[@]+"${fg[@]}"}
+    return 0
   fi
   info "Cuando quieras aplicarlos: ./setup.sh update"
 }
@@ -646,8 +1093,6 @@ rollback() {
 }
 
 # ------------------------------------------------------------ respaldo / desinstalación
-ALL_VOLUMES=(ai_home ai_workspace ai_ssh_host_keys ai_ts_state ai_mssql_data)
-
 confirm() {   # confirm "pregunta" -> 0 si responde s/S
   local ans; read -rp "$1 [s/N]: " ans || true
   [[ "$ans" =~ ^[sSyY]$ ]]
@@ -655,23 +1100,25 @@ confirm() {   # confirm "pregunta" -> 0 si responde s/S
 
 backup() {
   local dest="$SCRIPT_DIR/backups" file v mounts=()
-  for v in ai_home ai_workspace; do
+  for v in "${VOLUMES[@]}"; do
     docker volume inspect "$v" >/dev/null 2>&1 && mounts+=(-v "$v:/v/$v:ro")
   done
   (( ${#mounts[@]} )) || { warn "No hay volúmenes de datos que respaldar."; return 0; }
   mkdir -p "$dest"; chmod 700 "$dest"
-  file="ai-workspace-$(date +%Y%m%d-%H%M%S).tar.gz"
+  file="$AIWS_NAME-$(date +%Y%m%d-%H%M%S).tar.gz"
   # Si PostgreSQL local está corriendo, se detiene para un respaldo consistente
   docker exec -u "$WS_USER" "$CONTAINER" devdb stop all >/dev/null 2>&1 || true
   info "Respaldando home y proyectos -> backups/$file"
   docker run --rm "${mounts[@]}" -v "$dest:/b" --entrypoint tar \
-    "$(docker image inspect ai-workspace:latest >/dev/null 2>&1 && echo ai-workspace:latest || echo debian:12-slim)" \
+    "$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)" \
     czf "/b/$file" -C /v .
   chmod 600 "$dest/$file" 2>/dev/null || true
   docker exec -u "$WS_USER" "$CONTAINER" devdb autostart >/dev/null 2>&1 || true   # reanuda BD con autostart
   info "Respaldo listo: $dest/$file ($(du -h "$dest/$file" | cut -f1))"
-  keep_newest "$dest" 'ai-workspace-*.tar.gz' "$BACKUP_KEEP"
-  echo "    Restaurar: docker run --rm -v ai_home:/v/ai_home -v ai_workspace:/v/ai_workspace -v \$PWD/backups:/b debian:12-slim tar xzf /b/$file -C /v"
+  keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz" "$BACKUP_KEEP"
+  local restore_mounts=""
+  for v in "${VOLUMES[@]}"; do restore_mounts+="-v $v:/v/$v "; done
+  echo "    Restaurar: docker run --rm ${restore_mounts}-v \$PWD/backups:/b debian:12-slim tar xzf /b/$file -C /v"
 }
 
 uninstall() {
@@ -688,7 +1135,8 @@ uninstall() {
     echo "Se eliminarán contenedores, red e imagen. Se CONSERVAN: home, proyectos, BD locales, identidad SSH y Tailscale, .env."
     [[ "$yes" == true ]] || confirm "¿Continuar?" || { info "Cancelado."; return 0; }
     compose --profile mssql down --remove-orphans || true
-    docker image rm ai-workspace:latest >/dev/null 2>&1 || true
+    docker image rm "$IMAGE" >/dev/null 2>&1 || true
+    registry_remove
     info "Desinstalado. Para volver: ./setup.sh install (los datos siguen ahí)."
     return 0
   fi
@@ -714,8 +1162,9 @@ EOF
   for v in "${ALL_VOLUMES[@]}"; do
     docker volume rm "$v" >/dev/null 2>&1 && info "Volumen $v eliminado" || true
   done
-  docker image rm ai-workspace:latest >/dev/null 2>&1 || true
+  docker image rm "$IMAGE" >/dev/null 2>&1 || true
   rm -f "$ENV_FILE"
+  registry_remove
   info "Todo eliminado. Los archivos de esta carpeta quedan para reinstalar con ./setup.sh install"
 }
 
@@ -723,7 +1172,7 @@ menu() {
   local running=false
   bg_running && running=true
   echo
-  echo "${c_ok}ai-workspace${c_off} — ¿qué quieres hacer?"
+  echo "${c_ok}${AIWS_NAME}${c_off} — ¿qué quieres hacer?"
   if [[ -d "$SCRIPT_DIR/.git" ]]; then echo "  versión: $(g log -1 --format='%h %s (%cr)' 2>/dev/null)"; fi
   if [[ "$running" == true ]]; then
     echo "  ${c_warn}>> Hay una instalación/actualización EN CURSO (PID $(cat "$PID_FILE")). Usa la opción 3 para verla.${c_off}"
@@ -768,9 +1217,14 @@ main() {
 
   case "$cmd" in
     install)
-      local pubkey="" authkey="" fg=false
+      local pubkey="" authkey="" fg=false alias_set=false alias_arg=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
+          --alias)      alias_arg="${2:?falta el alias}"; alias_set=true; shift 2 ;;
+          --mem)        SIZE_MEM="${2:?falta el tamaño (ej.: --mem 4g)}"; shift 2 ;;
+          --mem=*)      SIZE_MEM="${1#*=}"; shift ;;
+          --cpus)       SIZE_CPUS="${2:?falta el número de CPUs (ej.: --cpus 2)}"; shift 2 ;;
+          --cpus=*)     SIZE_CPUS="${1#*=}"; shift ;;
           --pubkey)     pubkey="${2:?falta ruta o clave}"; shift 2 ;;
           --authkey)    authkey="${2:?falta key}"; shift 2 ;;
           --foreground) fg=true; shift ;;
@@ -782,7 +1236,10 @@ main() {
       check_prereqs
       check_files
       normalize_line_endings
+      if [[ "$alias_set" == true ]]; then bind_alias "$alias_arg"; fi
+      check_instance_owner
       configure_env "$authkey"
+      registry_add
       collect_pubkey "$pubkey"
       # 2) Lo largo: en segundo plano, inmune al corte de SSH
       if [[ "$fg" == true ]]; then install_steps; else run_bg install install_steps; fi
@@ -791,7 +1248,8 @@ main() {
       check_prereqs; check_files; normalize_line_endings
       if [[ "${1:-}" == --foreground ]]; then update_steps; else run_bg update update_steps; fi ;;
     progress)  follow ;;
-    upgrade|self-update) check_prereqs; upgrade ;;
+    resources) resources "$@" ;;
+    upgrade|self-update) check_prereqs; upgrade "$@" ;;
     rollback)  check_prereqs; rollback ;;
     clean)     check_prereqs; clean "$@" ;;
     components) components_cmd ;;

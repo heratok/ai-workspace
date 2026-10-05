@@ -14,6 +14,8 @@ sin que nadie tenga que hacerlo a mano.
    sin respaldo (volúmenes `ai_home`, `ai_workspace`, bases de datos).
 3. Tiene disponibles las funciones de `setup.sh`: `info`, `warn`, `die`, `env_get`, `env_set`, `env_del`,
    `compose`, `confirm`, y variables como `$SCRIPT_DIR`, `$ENV_FILE`, `$CONTAINER`.
+   Con varias instancias en el servidor, cada carpeta corre sus migraciones: usa `$CONTAINER`, `$IMAGE`,
+   `$TS_VOLUME` y `${VOLUMES[@]}` en lugar de nombres fijos, para no tocar otras instancias.
 4. Si falla (exit ≠ 0) el proceso se detiene y se reintenta en la siguiente ejecución.
 
 Comando manual: `./setup.sh migrate`.
