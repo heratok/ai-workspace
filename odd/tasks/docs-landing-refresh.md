@@ -25,7 +25,7 @@ Mode: strict (session config). Runner: none applicable (documentation and static
 - [x] T1 Remove all "Dusakawi EPS" mentions from the landing (route: delegated writer, trigger: 2+ non-trivial files)
 - [x] T2 Update README.md to match current behavior and improve structure (route: delegated writer)
 - [x] T3 Improve landing content so it matches the README and current features (route: delegated writer)
-- [ ] T4 Verify landing build, commit, push to main, CI green (route: inline)
+- [x] T4 Verify landing build, commit, push to main, CI green (route: inline) — commit 82eed0c, CI run 37406307326 green
 
 ## Acceptance criteria
 - `rg -i dusakawi landing/` returns nothing.
@@ -40,5 +40,7 @@ Mode: strict (session config). Runner: none applicable (documentation and static
 - Unverified (kept from previous README): devdb, ws-doctor, entrypoint, migrations details; resource suggestion ranges.
 - Not checked in a browser: nav with one extra link on small screens.
 
+- Review (reliability lens, medium): approved; advisory claims re-verified against aiws/setup.sh (resources flags, purge/progress/migrate, --yes, menu 8 clean, registry path via XDG_DATA_HOME, instance label). `rg -i dusakawi landing` (excluding node_modules/dist): none.
+
 ## Next step
-T4: review, commit, push to main, CI.
+Done. Optional follow-ups: check nav on mobile viewport; clarify that the alias copy button copies the full curl command.
