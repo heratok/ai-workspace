@@ -25,7 +25,7 @@ const instalar = [
   ['Migraciones y volúmenes', 'Aplica migrations/NNN-*.sh pendientes y crea ai_home y ai_workspace.'],
   ['Build y arranque', 'Construye la imagen; el workspace espera a que el sidecar esté healthy.'],
   ['Limpia y autoriza', 'Borra la auth key del .env tras registrar el nodo y autoriza tu clave SSH.'],
-  ['Diagnóstico', 'ws-doctor revisa herramientas, rutas y permisos e imprime cómo conectarte.'],
+  ['aiws y diagnóstico', 'Deja el comando aiws en el PATH; ws-doctor revisa herramientas, rutas y permisos e imprime cómo conectarte.'],
 ];
 
 const arranque = [
@@ -47,12 +47,28 @@ const capasImagen = [
   { t: 'Base', d: 'debian:12-slim, config/packages.apt, locale en_US.UTF-8 y zona America/Bogota.', k: 'imagen' },
 ];
 
+const instancias = [
+  ['Aisladas entre sí', 'Cada instancia tiene su carpeta, imagen, volúmenes, identidad SSH y nodo propio en Tailscale. Uninstall o backup de una no tocan a las demás.'],
+  ['Mismo comando para crearlas', 'Si ya existe la principal, install.sh pregunta el alias (sugiere 2, 3…). Para elegirlo sin preguntas: --alias NOMBRE o AIWS_INSTANCE.'],
+  ['Topes, no reservas', 'MEM_LIMIT y CPUS son máximos por instancia; el instalador los sugiere según la RAM y las instancias existentes. Se cambian sin reconstruir.'],
+  ['Sin conflicto de puertos', 'No se publica nada en el servidor: cada instancia entra por su propio nodo de Tailscale, con nombre ai-workspace-ALIAS.'],
+];
+
+const aiws = [
+  ['curl -fsSL https://raw.githubusercontent.com/heratok/ai-workspace/main/install.sh | bash -s -- --alias cliente-a', 'Crear una instancia con alias'],
+  ['aiws ls', 'Instancias, estado, Tailscale, carpeta y recursos'],
+  ['aiws upgrade --all', 'Actualiza todas, una tras otra, con una sola confirmación'],
+  ['aiws upgrade santiago maria', 'Actualiza solo las que indiques'],
+  ['aiws shell santiago', 'Abre una shell en esa instancia'],
+  ['aiws resources santiago --mem 4g --cpus 2', 'Cambia los topes sin reconstruir'],
+];
+
 const seguridad = [
   { t: 'NET_ADMIN solo en el sidecar', d: 'El workspace no recibe capabilities ni /dev/net/tun.', i: 'red' },
   { t: 'Usuario ai sin root', d: 'Sin sudo ni docker.sock. Root solo prepara sshd en el arranque.', i: 'user' },
   { t: 'no-new-privileges', d: 'Ningún binario setuid puede escalar privilegios.', i: 'lock' },
   { t: 'SSH endurecido', d: 'Solo clave pública, AllowUsers ai, MaxAuthTries 3, LoginGraceTime 30.', i: 'key' },
-  { t: 'Límites de recursos', d: '8 GB de RAM, 4 CPU y 2048 procesos: un proceso desbocado no tumba el servidor.', i: 'cpu' },
+  { t: 'Límites de recursos', d: 'Topes de memoria, CPU, procesos y /dev/shm por instancia (por defecto 8 GB, 4 CPU y 2048 procesos): un proceso desbocado no tumba el servidor.', i: 'cpu' },
   { t: 'Secretos fuera de la imagen', d: '.env 600 fuera de git, auth key borrada tras el registro, Doppler para proyectos.', i: 'vault' },
   { t: 'Bases en 127.0.0.1', d: 'PostgreSQL y Redis de devdb solo en loopback; desde tu PC, túnel SSH.', i: 'db' },
 ];
@@ -76,7 +92,7 @@ const volumenes = [
 ];
 
 const pipeline = [
-  { e: 'GitHub', t: 'push a main', d: 'CI: sintaxis, ShellCheck, compose válido, build completo y verificación de cada herramienta.' },
+  { e: 'GitHub', t: 'push a main', d: 'CI en ubuntu-24.04: sintaxis, ShellCheck, pruebas de instancias y de aiws, compose válido, build completo y verificación de cada herramienta. Las actions van fijadas por SHA y Dependabot las revisa cada semana.' },
   { e: 'servidor', t: 'upgrade', d: 'fetch + merge --ff-only. Stash de cambios locales, anota la versión previa y agrega variables nuevas al .env.' },
   { e: 'servidor', t: 'migrate + update', d: 'Cada migración corre una sola vez. Si el build falla, el contenedor anterior sigue en pie.' },
   { e: 'plan B', t: 'rollback', d: 'Vuelve a la versión anotada y reconstruye. clean borra solo las imágenes del proyecto.' },
@@ -89,6 +105,7 @@ const comandos = [
   ['components', 'Elige agentes y herramientas'],
   ['progress', 'Sigue la instalación en vivo'],
   ['backup', 'Respalda home y proyectos'],
+  ['resources --mem 4g --cpus 2', 'Cambia los topes sin reconstruir'],
   ['clean --deep', 'Imágenes, logs y respaldos viejos'],
   ['doctor', 'Diagnóstico de herramientas y permisos'],
 ];
@@ -107,7 +124,7 @@ const comandos = [
         <div class="cta rv">
           <a class="btn primario" href="#diagrama">Explorar el diagrama
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></a>
-          <a class="btn" href="#operacion">Cómo se actualiza</a>
+          <a class="btn" href="#instancias">Varias instancias</a>
         </div>
         <div class="instalar rv">
           {instalacion.map(([t, c]) => (
@@ -124,8 +141,8 @@ const comandos = [
 
     <section class="wrap stats rv">
       <div><strong class="display">0</strong><span>puertos publicados en el servidor</span></div>
-      <div><strong class="display">1</strong><span>script para instalar, actualizar y operar</span></div>
-      <div><strong class="display">5</strong><span>volúmenes que persisten</span></div>
+      <div><strong class="display">1</strong><span>comando para instalar, y otro para cada instancia extra</span></div>
+      <div><strong class="display">5</strong><span>volúmenes que persisten por instancia</span></div>
       <div><strong class="display">0</strong><span>privilegios de root para el usuario</span></div>
     </section>
 
@@ -139,7 +156,7 @@ const comandos = [
     <!-- CICLO DE VIDA -->
     <section id="ciclo" class="wrap bloque">
       <header class="cab rv"><span class="num mono">02</span><h2>Ciclo de vida</h2>
-        <p>Todo se opera con <code>setup.sh</code>. Primero instala desde el servidor y luego el contenedor se prepara solo en cada arranque.</p></header>
+        <p>Cada instancia se opera con <code>setup.sh</code> desde su carpeta. Primero instala desde el servidor y luego el contenedor se prepara solo en cada arranque.</p></header>
       <div class="tabs rv" role="tablist">
         <button role="tab" aria-selected="true" data-tab="instalar"><code>./setup.sh install</code><span>8 pasos</span></button>
         <button role="tab" aria-selected="false" data-tab="arranque"><code>entrypoint.sh</code><span>7 pasos</span></button>
@@ -152,9 +169,24 @@ const comandos = [
       </ol>
     </section>
 
+    <!-- INSTANCIAS -->
+    <section id="instancias" class="wrap bloque">
+      <header class="cab rv"><span class="num mono">03</span><h2>Varias instancias, un solo servidor</h2>
+        <p>Un entorno por cliente o por persona, completamente aislados. El comando <code>aiws</code> las administra todas sin entrar a la carpeta de cada una.</p></header>
+      <ol class="pasos">
+        {instancias.map(([t, d], i) => (<li class="rv" style={`--d:${i * 50}ms`}><span class="n display">{String(i + 1).padStart(2, '0')}</span><h3>{t}</h3><p>{d}</p></li>))}
+      </ol>
+      <div class="cmds sub">
+        {aiws.map(([c, d]) => (
+          <button class="cmd rv" data-copiar={c}><code>{c.startsWith('curl') ? 'install.sh --alias cliente-a' : c}</code><span>{d}</span><em class="mono">copiar</em></button>
+        ))}
+      </div>
+      <p class="nota rv">La principal conserva sus nombres de siempre. <code>aiws</code> delega cada acción en el <code>setup.sh</code> de la instancia; con varias a la vez continúa si una falla y muestra un resumen. Los comandos destructivos (<code>rollback</code>, <code>clean</code>, <code>uninstall</code>, <code>purge</code>) exigen una sola instancia.</p>
+    </section>
+
     <!-- IMAGEN -->
     <section id="imagen" class="wrap bloque">
-      <header class="cab rv"><span class="num mono">03</span><h2>La imagen, capa por capa</h2>
+      <header class="cab rv"><span class="num mono">04</span><h2>La imagen, capa por capa</h2>
         <p>Lo del sistema va en la imagen. Lo del usuario va sin root en su home y no requiere reconstruir.</p></header>
       <div class="pila">
         {capasImagen.map((c, i) => (
@@ -169,7 +201,7 @@ const comandos = [
 
     <!-- SEGURIDAD -->
     <section id="seguridad" class="wrap bloque">
-      <header class="cab rv"><span class="num mono">04</span><h2>Seguridad por capas</h2>
+      <header class="cab rv"><span class="num mono">05</span><h2>Seguridad por capas</h2>
         <p>Pensado para datos sensibles: cada capa reduce lo que un atacante, o un error, puede alcanzar.</p></header>
       <div class="bento">
         <article class="card grande rv">
@@ -188,8 +220,8 @@ const comandos = [
 
     <!-- PERSISTENCIA -->
     <section class="wrap bloque">
-      <header class="cab rv"><span class="num mono">05</span><h2>Lo que persiste</h2>
-        <p><code>uninstall</code> conserva todo. Solo <code>uninstall --all</code> borra, después de ofrecer respaldo y pedir que escribas <code>BORRAR</code>.</p></header>
+      <header class="cab rv"><span class="num mono">06</span><h2>Lo que persiste</h2>
+        <p><code>uninstall</code> conserva todo. Solo <code>uninstall --all</code> borra, después de ofrecer respaldo y pedir que escribas <code>BORRAR</code>. Los nombres son los de la principal; en una instancia con alias <code>foo</code> son <code>ai-workspace-foo_home</code>, <code>ai-workspace-foo_workspace</code>, etc.</p></header>
       <div class="vols">
         {volumenes.map(v => (
           <article class="vol rv">
@@ -204,8 +236,8 @@ const comandos = [
 
     <!-- OPERACIÓN -->
     <section id="operacion" class="wrap bloque">
-      <header class="cab rv"><span class="num mono">06</span><h2>Actualizaciones sin miedo</h2>
-        <p>Cada cambio se verifica antes de llegar al servidor, y siempre hay un camino de vuelta.</p></header>
+      <header class="cab rv"><span class="num mono">07</span><h2>Actualizaciones sin miedo</h2>
+        <p>Cada cambio se verifica antes de llegar al servidor, y siempre hay un camino de vuelta. Para varias instancias: <code>aiws upgrade --all</code>.</p></header>
       <ol class="pipe">
         {pipeline.map((p, i) => (
           <li class="rv" style={`--d:${i * 90}ms`}><span class="punto"></span><span class="e mono">{p.e}</span><h3>{p.t}</h3><p>{p.d}</p></li>
@@ -215,7 +247,7 @@ const comandos = [
 
     <!-- COMANDOS -->
     <section class="wrap bloque">
-      <header class="cab rv"><span class="num mono">07</span><h2>A mano</h2>
+      <header class="cab rv"><span class="num mono">08</span><h2>A mano</h2>
         <p>Los comandos que más vas a usar. Haz clic para copiar.</p></header>
       <div class="cmds">
         {comandos.map(([c, d]) => (
@@ -234,7 +266,7 @@ const comandos = [
 
     <footer class="wrap pie">
       <p class="marca display" aria-hidden="true">ai-workspace</p>
-      <p>ai-workspace · Dusakawi EPS · Basado en docker-compose.yml, Dockerfile, entrypoint.sh y setup.sh</p>
+      <p>ai-workspace · Basado en docker-compose.yml, Dockerfile, entrypoint.sh, setup.sh, install.sh y aiws</p>
     </footer>
   </main>
 </Base>
@@ -423,6 +455,8 @@ const comandos = [
   .cmd span { color: var(--muted); font-size: .82rem; }
   .cmd em { position: absolute; top: .8rem; right: .9rem; font-style: normal; font-size: .68rem; color: var(--subtle); opacity: 0; transition: opacity .15s; }
   .cmd:hover em, .cmd:focus-visible em { opacity: 1; }
+
+  .cmds.sub { margin-top: 1rem; }
 
   /* Instalación en el hero */
   .instalar { display: grid; gap: .5rem; margin-top: 1.5rem; max-width: 100%; }
