@@ -19,7 +19,7 @@ Entorno de desarrollo aislado en Docker para trabajar con agentes de IA, accesib
 3. [Varias instancias](#varias-instancias-en-un-servidor) y [`aiws`](#gestionar-instancias-con-aiws)
 4. [Configuración](#configuración): [`.env`](#variables-del-env), [recursos](#recursos-por-instancia-memoria-y-cpus), [componentes](#componentes-instala-solo-lo-que-necesitas)
 5. [Operación](#operación): [comandos](#comandos-de-setupsh), [actualizar](#actualizar-a-la-última-versión), [respaldos y limpieza](#limpieza-y-migraciones), [volúmenes](#volúmenes)
-6. [Qué trae la imagen](#qué-trae-la-imagen), [bases de datos](#bases-de-datos-dentro-del-workspace-sin-root) y [herramientas](#instalar-herramientas)
+6. [Qué trae la imagen](#qué-trae-la-imagen), [bases de datos](#bases-de-datos-dentro-del-workspace-sin-root) y [herramientas](#instalar-herramientas) (con la [guía para agentes](#guía-para-agentes))
 7. [Solución de problemas](#solución-de-problemas)
 8. [CI](#verificación-automática-ci) y [migración desde v1](#migración-desde-v1)
 
@@ -491,6 +491,14 @@ Todo lo que instalas **sin root** queda en `ai_home`, así que sobrevive a `upda
 | Otra versión del navegador de Playwright | `npx playwright install chromium` o `playwright-cli install-browser chromium` | No |
 | Un servidor de base de datos (PostgreSQL, Redis) | `devdb install postgres 17` o `devdb install redis` | No |
 | CLIs como binario (Go, Rust, Java, Terraform, kubectl, Bun, Deno…) | `mise use -g go@latest`, `mise use -g terraform`, `mise use -g bun` (busca con `mise registry`) | No |
+
+### Guía para agentes
+
+La imagen trae una guía corta (`/etc/ai-workspace/AGENTS.md`, fuente: `config/AGENTS.md`) que explica a los agentes qué se puede instalar sin root y cómo, qué falla y por qué, y qué componentes incluye esta imagen.
+
+- En cada arranque, `entrypoint.sh` siembra `/workspace/AGENTS.md` (enlace a la guía) y `/workspace/CLAUDE.md` (importa la guía con `@`). Así Claude Code, opencode, Pi y otros la leen solos.
+- Si esos archivos ya existen (incluso modificados), no se tocan. Nunca se escribe en `~/.claude`, `~/.config/opencode`, etc.
+- Para leerla tú: `ws-doctor --guide`. `ws-doctor` avisa si falta.
 
 ### Instaladores `curl | sh` (opencode, bun, deno, rust…)
 

@@ -2,6 +2,12 @@
 # Diagnóstico rápido del entorno: versiones, rutas y escritura sin root.
 set -uo pipefail
 
+GUIDE=/etc/ai-workspace/AGENTS.md
+if [[ "${1:-}" == "--guide" ]]; then
+  if [[ -r "$GUIDE" ]]; then cat "$GUIDE"; exit 0; fi
+  echo "No existe $GUIDE" >&2; exit 1
+fi
+
 ok()   { printf '  \e[32m✔\e[0m %-14s %s\n' "$1" "$2"; }
 fail() { printf '  \e[31m✘\e[0m %-14s %s\n' "$1" "$2"; FAILED=1; }
 FAILED=0
@@ -70,6 +76,13 @@ echo "Escritura sin root:"
 for d in "$HOME" /workspace "${NPM_CONFIG_PREFIX:-$HOME/.npm-global}" "$HOME/.local/bin"; do
   mkdir -p "$d" 2>/dev/null
   if [[ -w "$d" ]]; then ok "$(basename "$d")" "$d"; else fail "$(basename "$d")" "$d no escribible"; fi
+done
+
+echo "Guía para agentes:"
+if [[ -r "$GUIDE" ]]; then ok guía "$GUIDE (ws-doctor --guide)"; else fail guía "falta $GUIDE"; fi
+for f in AGENTS.md CLAUDE.md; do
+  if [[ -e "/workspace/$f" ]]; then ok "$f" "/workspace/$f"
+  else printf '  - %-14s no existe en /workspace (se siembra al reiniciar el contenedor)\n' "$f"; fi
 done
 
 echo "Entorno:"

@@ -190,6 +190,8 @@ RUN groupadd -g "${USER_GID}" "${USERNAME}" \
 
 COPY config/env.sh   /etc/ai-workspace/env.sh
 COPY config/zshrc    /etc/ai-workspace/zshrc
+COPY config/AGENTS.md /etc/ai-workspace/AGENTS.md
+COPY config/seed-guide.sh /etc/ai-workspace/seed-guide.sh
 COPY --chown=${USER_UID}:${USER_GID} config/skel/zshrc /etc/skel-ai/.zshrc
 COPY config/sshd-ai-workspace.conf /etc/ssh/sshd_config.d/10-ai-workspace.conf
 COPY --chmod=755 config/ws-doctor /usr/local/bin/ws-doctor
@@ -202,6 +204,21 @@ RUN ln -sf /etc/ai-workspace/env.sh /etc/profile.d/10-ai-workspace.sh \
  && echo '. /etc/ai-workspace/env.sh' >> /etc/bash.bashrc \
  && echo '[[ -r /etc/ai-workspace/zshrc ]] && source /etc/ai-workspace/zshrc' >> /etc/zsh/zshrc \
  && sed -i "s/^AllowUsers .*/AllowUsers ${USERNAME}/" /etc/ssh/sshd_config.d/10-ai-workspace.conf
+
+# Guía para agentes: anexa los componentes realmente incluidos en esta imagen
+RUN yn() { [[ "$1" == "true" ]] && echo sí || echo no; } \
+ && { echo; echo "## Componentes incluidos en esta imagen"; echo; \
+      echo "- Claude Code: $(yn "${INSTALL_CLAUDE}")"; \
+      echo "- Pi: $(yn "${INSTALL_PI}")"; \
+      echo "- opencode: $(yn "${INSTALL_OPENCODE}")"; \
+      echo "- Playwright (playwright, playwright-cli, playwright-mcp): $(yn "${INSTALL_PLAYWRIGHT}")"; \
+      echo "- Gentle AI: $(yn "${INSTALL_GENTLE_AI}")"; \
+      echo "- Antigravity (agy): $(yn "${INSTALL_AGY}")"; \
+      echo "- Herdr: $(yn "${INSTALL_HERDR}")"; \
+      echo "- Doppler: $(yn "${INSTALL_DOPPLER}")"; \
+      echo "- Servidor PostgreSQL en la imagen: $(yn "${INSTALL_PG_SERVER}") (si no, usa devdb install postgres)"; \
+      echo "- sqlcmd (SQL Server tools): $(yn "${INSTALL_MSSQL_TOOLS}")"; \
+    } >> /etc/ai-workspace/AGENTS.md
 
 ENV WORKSPACE_USER=${USERNAME}
 WORKDIR /workspace

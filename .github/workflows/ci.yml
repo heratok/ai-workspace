@@ -19,16 +19,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Sintaxis bash
         run: |
-          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh migrations/*.sh tests/*.sh; do
+          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh migrations/*.sh tests/*.sh; do
             bash -n "$f" && echo "ok $f"
           done
           sh -n config/env.sh
       - name: ShellCheck (solo errores)
-        run: shellcheck -S error install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh tests/instances.test.sh tests/aiws.test.sh
+        run: shellcheck -S error install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh tests/instances.test.sh tests/aiws.test.sh tests/guide.test.sh
       - name: Pruebas de multi-instancia
         run: bash tests/instances.test.sh
       - name: Pruebas del comando aiws
         run: bash tests/aiws.test.sh
+      - name: Pruebas de la guía para agentes
+        run: bash tests/guide.test.sh
       - name: docker compose config
         run: |
           cp env.example .env
@@ -73,3 +75,16 @@ jobs:
               command -v "$c" >/dev/null || { echo "FALTA: $c"; exit 1; }
               echo "ok $c"
             done'
+      - name: Verificar la guía para agentes dentro de la imagen
+        run: |
+          docker run --rm --entrypoint bash ai-workspace:ci -c '
+            set -e
+            g=/etc/ai-workspace/AGENTS.md
+            test -s "$g" || { echo "FALTA: $g"; exit 1; }
+            grep -q "Componentes incluidos" "$g" || { echo "La guía no tiene la sección de componentes"; exit 1; }
+            # cada comando citado en las tablas de la guía debe existir en la imagen
+            for c in $(grep -E "^\|" "$g" | grep -oE "\`[^\`]+\`" | tr -d "\`" | awk "{print \$1}" | grep -E "^[a-z][a-z0-9-]*$" | sort -u); do
+              command -v "$c" >/dev/null || { echo "FALTA (citado en la guía): $c"; exit 1; }
+              echo "ok guía: $c"
+            done
+            ws-doctor --guide | grep -q "Guía del entorno"'

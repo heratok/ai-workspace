@@ -48,6 +48,9 @@ else
   log "AVISO: no existe $HOME_DIR/.ssh/authorized_keys; no podrás entrar por SSH."
 fi
 
+# 4b. Sembrar la guía para agentes en /workspace (solo si no existen; nunca pisa archivos del usuario)
+bash /etc/ai-workspace/seed-guide.sh || log "AVISO: no se pudo sembrar la guía de agentes"
+
 # 5. Variables de conexión a servicios -> sesiones SSH (ENV de Docker no llega a SSH)
 RUNTIME_ENV=/etc/ai-workspace/runtime.env
 {
