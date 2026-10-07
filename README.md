@@ -19,7 +19,7 @@ Entorno de desarrollo aislado en Docker para trabajar con agentes de IA, accesib
 3. [Varias instancias](#varias-instancias-en-un-servidor) y [`aiws`](#gestionar-instancias-con-aiws)
 4. [Configuración](#configuración): [`.env`](#variables-del-env), [recursos](#recursos-por-instancia-memoria-y-cpus), [componentes](#componentes-instala-solo-lo-que-necesitas)
 5. [Operación](#operación): [comandos](#comandos-de-setupsh), [actualizar](#actualizar-a-la-última-versión), [respaldos y limpieza](#limpieza-y-migraciones), [volúmenes](#volúmenes)
-6. [Qué trae la imagen](#qué-trae-la-imagen), [bases de datos](#bases-de-datos-dentro-del-workspace-sin-root) y [herramientas](#instalar-herramientas) (con la [guía para agentes](#guía-para-agentes))
+6. [Qué trae la imagen](#qué-trae-la-imagen), [bases de datos](#bases-de-datos-dentro-del-workspace-sin-root) y [herramientas](#instalar-herramientas) (con la [guía para agentes](#guía-para-agentes) y el [login OAuth con callback en localhost](#login-oauth-con-callback-en-localhost))
 7. [Solución de problemas](#solución-de-problemas)
 8. [CI](#verificación-automática-ci) y [migración desde v1](#migración-desde-v1)
 
@@ -500,6 +500,31 @@ La imagen trae una guía corta (`/etc/ai-workspace/AGENTS.md`, fuente: `config/A
 - Si esos archivos ya existen (incluso modificados), no se tocan. Nunca se escribe en `~/.claude`, `~/.config/opencode`, etc.
 - Para leerla tú: `ws-doctor --guide`. `ws-doctor` avisa si falta.
 
+### Login OAuth con callback en localhost
+
+Algunas herramientas (pi, MCPs con OAuth, etc.) abren una URL de login cuyo `redirect_uri` es `http://localhost:PUERTO/...`. Ese `localhost` es el de **tu PC**, no el del contenedor donde espera la herramienta, así que el navegador termina en `ERR_CONNECTION_REFUSED`. El `sshd` corre dentro del contenedor (comparte red con el sidecar de Tailscale, sin puertos publicados en el host) y permite `AllowTcpForwarding yes`, así que un túnel `ssh -L` desde tu PC llega al loopback del contenedor. El `PUERTO` aparece en el `redirect_uri` de la URL de login.
+
+Tres métodos, en este orden:
+
+- **A) Agregar el túnel sin reconectar.** Dentro de la sesión SSH pulsa `~C` (al inicio de una línea, tras Enter) y escribe `-L PUERTO:127.0.0.1:PUERTO`. Luego abre la URL de login en tu navegador. Sirve para puertos aleatorios.
+- **B) Puerto fijo en `~/.ssh/config` (Windows: `%USERPROFILE%\.ssh\config`).** Para herramientas con puerto fijo, como pi (`53692`):
+
+  ```
+  Host ai-workspace
+      HostName ai-workspace
+      User ai
+      LocalForward 53692 127.0.0.1:53692
+  ```
+
+  `53692` es el puerto de pi. Para puertos aleatorios usa A o C.
+- **C) Sin túnel (probar primero; no verificado con todas las herramientas).** Tras autorizar, copia la URL completa de la barra de direcciones (la del error) y, dentro del contenedor y mientras la herramienta sigue esperando, ejecuta `curl '<url>'`.
+
+Notas:
+
+- `mosh` no reenvía puertos: abre una sesión aparte con `ssh -N -L PUERTO:127.0.0.1:PUERTO ai@ai-workspace`.
+- No lo necesitan `gh auth login`, `doppler login` ni `agy` (usan flujos de código o pegado).
+- `ws-doctor` comprueba que el reenvío de puertos esté habilitado.
+
 ### Instaladores `curl | sh` (opencode, bun, deno, rust…)
 
 Funcionan **sin root**: escriben en tu home, y esas carpetas ya están en el `PATH` y se conservan en `ai_home`.
@@ -578,6 +603,7 @@ claude mcp add playwright -- playwright-mcp # registrar el servidor MCP en Claud
 | No entro por SSH | Comprueba `./setup.sh ts-status` y `./setup.sh doctor`. Si no autorizaste tu clave: `./setup.sh add-key` |
 | Permisos incorrectos en el home tras cambiar `USER_UID` / `USER_GID` | Pon `FIX_OWNERSHIP=true` una sola vez y ejecuta `./setup.sh update` |
 | El frontend no abre en `:3000` / `:5173` | El servidor de desarrollo debe escuchar en `0.0.0.0` (p. ej. `vite --host`) |
+| `ERR_CONNECTION_REFUSED` en `localhost:PUERTO` al hacer login de una herramienta | El callback apunta al `localhost` de tu PC. Abre un túnel `ssh -L`: ver [Login OAuth con callback en localhost](#login-oauth-con-callback-en-localhost) |
 | `agy` falla con `Illegal instruction` | El servidor (o su VM) no expone las instrucciones AES de la CPU. Habilítalas en el hipervisor o desmarca el componente |
 | La suma de `MEM_LIMIT` supera la RAM | Es un aviso, no un error: son topes. Ajusta con `aiws resources ALIAS --mem 4g` si varias instancias usan memoria a la vez |
 

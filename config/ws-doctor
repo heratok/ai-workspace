@@ -85,6 +85,18 @@ for f in AGENTS.md CLAUDE.md; do
   else printf '  - %-14s no existe en /workspace (se siembra al reiniciar el contenedor)\n' "$f"; fi
 done
 
+echo "Reenvío de puertos (OAuth):"
+SSHD_CONF="${AIWS_SSHD_CONF:-/etc/ssh/sshd_config.d/10-ai-workspace.conf}"
+if [[ ! -r "$SSHD_CONF" ]]; then
+  printf '  - %-14s no se pudo leer %s (se omite)\n' reenvío "$SSHD_CONF"
+elif grep -qiE '^[[:space:]]*AllowTcpForwarding[[:space:]]+(yes|all|local)' "$SSHD_CONF"; then
+  ok reenvío "AllowTcpForwarding habilitado: ssh -L funciona (ver la guía, login OAuth)"
+elif grep -qiE '^[[:space:]]*AllowTcpForwarding[[:space:]]+(no|remote)' "$SSHD_CONF"; then
+  fail reenvío "AllowTcpForwarding deshabilitado en $SSHD_CONF: ssh -L no funcionará"
+else
+  printf '  - %-14s sin AllowTcpForwarding en %s (sshd usa yes por defecto)\n' reenvío "$SSHD_CONF"
+fi
+
 echo "Entorno:"
 ok LANG "${LANG:-<vacío>}"
 ok PATH "$PATH"

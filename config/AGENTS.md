@@ -38,6 +38,16 @@ Los instaladores `curl | sh` que escriben en el home funcionan (opencode, bun, r
 - Secretos: `doppler login` una vez, o `DOPPLER_TOKEN` en el entorno.
 - GitHub: `gh auth login` (la sesión queda en el volumen).
 
+## Login OAuth con callback en localhost
+
+Si la URL de login trae `redirect_uri=http://localhost:PUERTO/...`, el navegador del usuario (su PC) no llega a este contenedor y falla con ERR_CONNECTION_REFUSED. Anota el PUERTO y pide al usuario uno de estos métodos, en orden:
+
+- A) En su sesión SSH, sin reconectar: pulsar `~C` y escribir `-L PUERTO:127.0.0.1:PUERTO` (Enter).
+- B) Puerto fijo (pi usa 53692): `LocalForward 53692 127.0.0.1:53692` bajo `Host ai-workspace` en su `~/.ssh/config`.
+- C) Sin túnel (probar primero; no verificado con todas las herramientas): que copie la URL completa de la barra de direcciones y ejecutarla aquí con `curl '<url>'` mientras la herramienta sigue esperando.
+
+`mosh` no reenvía puertos. `gh auth login`, `doppler login` y `agy` no lo necesitan.
+
 ## No investigues
 
 Mira primero esta guía. No pruebes `sudo`, `apt` ni instaladores al azar para averiguar qué se puede. Para diagnosticar ejecuta `ws-doctor`; para releer esta guía, `ws-doctor --guide`.

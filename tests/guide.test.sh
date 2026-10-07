@@ -148,6 +148,47 @@ t_ws_doctor_has_guide_option() {
   assert_has "ws-doctor --guide" "$(cat "$ROOT/config/ws-doctor")" "--guide"
 }
 
+
+t_guide_oauth_section() {
+  local g; g="$(cat "$GUIDE_SRC" 2>/dev/null)"
+  assert_has "sección OAuth" "$g" "Login OAuth con callback en localhost"
+  assert_has "método A (~C)" "$g" '~C'
+  assert_has "método B (LocalForward)" "$g" "LocalForward"
+  assert_has "método C (curl)" "$g" "curl"
+  local n; n="$(wc -l < "$GUIDE_SRC" | tr -d ' ')"
+  (( n <= 60 )) && ok || nok "la guía debe tener <= 60 líneas (tiene $n)"
+  local pos_oauth pos_inv pos_mark
+  pos_oauth="$(grep -n 'Login OAuth con callback' "$GUIDE_SRC" | head -n1 | cut -d: -f1)"
+  pos_inv="$(grep -n '^## No investigues' "$GUIDE_SRC" | cut -d: -f1)"
+  pos_mark="$(grep -n '<!-- componentes -->' "$GUIDE_SRC" | cut -d: -f1)"
+  (( ${pos_oauth:-999} < ${pos_inv:-0} && ${pos_inv:-0} < ${pos_mark:-0} )) && ok || nok "orden: OAuth < No investigues < marca"
+}
+
+# ws-doctor: chequeo de reenvío de puertos con AIWS_SSHD_CONF apuntando a un archivo temporal
+doctor_fwd() { AIWS_SSHD_CONF="$1" bash "$ROOT/config/ws-doctor" 2>&1 | grep -A1 'Reenvío de puertos (OAuth)'; }
+
+t_doctor_forwarding_yes() {
+  mk_sandbox; printf 'AllowUsers ai\nAllowTcpForwarding yes\n' > "$SB/sshd.conf"
+  local out; out="$(doctor_fwd "$SB/sshd.conf")"
+  assert_has "yes -> ok" "$out" "✔"
+  assert_has "yes -> texto" "$out" "habilitado"
+}
+
+t_doctor_forwarding_no() {
+  mk_sandbox; printf 'AllowTcpForwarding no\n' > "$SB/sshd.conf"
+  local out; out="$(doctor_fwd "$SB/sshd.conf")"
+  assert_has "no -> fail" "$out" "✘"
+  assert_has "no -> texto" "$out" "deshabilitado"
+}
+
+t_doctor_forwarding_missing() {
+  mk_sandbox
+  local out; out="$(doctor_fwd "$SB/no-existe.conf")"
+  assert_has "ausente -> aviso" "$out" "-"
+  assert_has "ausente -> texto" "$out" "no se pudo leer"
+  [[ "$out" != *"✘"* ]] && ok || nok "archivo ausente no debe ser fallo"
+}
+
 run_sym t_seed_creates_both
 run_sym t_seed_symlink_target
 run_sym t_seed_claude_import
@@ -160,6 +201,10 @@ run t_guide_exists_and_short
 run t_guide_commands_allowed
 run t_guide_commands_checked_by_ci
 run t_ws_doctor_has_guide_option
+run t_guide_oauth_section
+run t_doctor_forwarding_yes
+run t_doctor_forwarding_no
+run t_doctor_forwarding_missing
 
 p="$(wc -l < "$PASSES" | tr -d ' ')"; f="$(wc -l < "$FAILS" | tr -d ' ')"
 echo
