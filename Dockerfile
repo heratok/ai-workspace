@@ -165,13 +165,16 @@ RUN if [[ "${INSTALL_GENTLE_AI}" == "true" ]]; then \
         | bash -s -- --method binary --dir /usr/local/bin \
    && /usr/local/bin/gentle-ai --version; \
     fi
+# fetch-script.sh: el CDN de Google a veces entrega el instalador en gzip sin avisar
+COPY --chmod=755 config/fetch-script.sh /tmp/fetch-script.sh
 RUN if [[ "${INSTALL_AGY}" == "true" ]]; then \
       tmp_home="$(mktemp -d)" \
-   && curl -fsSL https://antigravity.google/cli/install.sh | HOME="$tmp_home" bash \
+   && /tmp/fetch-script.sh https://antigravity.google/cli/install.sh | HOME="$tmp_home" bash \
    && install -m 755 "$tmp_home/.local/bin/agy" /usr/local/bin/agy \
    && rm -rf "$tmp_home" \
    && ls -l /usr/local/bin/agy; \
-    fi
+    fi \
+ && rm -f /tmp/fetch-script.sh
 
 # ---------------------------------------------------------------------------
 # 6b. Herramientas extra (Moshi, binarios propios...) -> config/extra-root.sh

@@ -19,18 +19,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Sintaxis bash
         run: |
-          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh migrations/*.sh tests/*.sh; do
+          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh tests/*.sh; do
             bash -n "$f" && echo "ok $f"
           done
           sh -n config/env.sh
       - name: ShellCheck (solo errores)
-        run: shellcheck -S error install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh tests/instances.test.sh tests/aiws.test.sh tests/guide.test.sh
+        run: shellcheck -S error install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh tests/instances.test.sh tests/aiws.test.sh tests/guide.test.sh tests/fetch-script.test.sh
       - name: Pruebas de multi-instancia
         run: bash tests/instances.test.sh
       - name: Pruebas del comando aiws
         run: bash tests/aiws.test.sh
       - name: Pruebas de la guía para agentes
         run: bash tests/guide.test.sh
+      - name: Pruebas de la descarga de instaladores
+        run: bash tests/fetch-script.test.sh
       - name: docker compose config
         run: |
           cp env.example .env
