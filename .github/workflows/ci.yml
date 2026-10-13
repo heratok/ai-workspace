@@ -40,6 +40,10 @@ jobs:
         run: bash tests/docs.test.sh
       - name: Pruebas de endurecimiento del compose
         run: bash tests/hardening.test.sh
+      - name: Pruebas de la estructura de setup.sh (módulos en lib/)
+        run: bash tests/modules.test.sh
+      - name: Pruebas de las migraciones (no borran datos ni contenedores en uso)
+        run: bash tests/migrations.test.sh
       - name: Pruebas de tools (buscar y aplicar versiones nuevas)
         run: bash tests/tools.test.sh
       - name: Pruebas de update-pins (listar y fijar versiones)
