@@ -366,6 +366,19 @@ t_migration_is_idempotent_and_survives_a_missing_dotenv() {
   rm -f "$ENVF"; run_migration >/dev/null; assert_eq "sin .env no falla" "0" "$?"
 }
 
+t_migration_removes_the_former_floating_default_of_tailscale() {
+  # Hallado probando el upgrade real: los .env creados antes de fijar versiones traen TS_IMAGE_TAG=stable (el valor por
+  # defecto de entonces, no una elección del usuario). Dejarlo como "override" aparecía como versión nueva para siempre.
+  load_tools; [[ -f "$MIGRATION" ]] || { nok "falta la migración 003"; return 0; }
+  printf 'TS_IMAGE_TAG=stable\n' >> "$ENVF"
+  local out; out="$(run_migration)"; assert_eq "código de salida" "0" "$?"
+  assert_eq "el valor por defecto anterior se quita" "" "$(dotenv TS_IMAGE_TAG)"
+  assert_lacks "sin aviso de override" "$out" "conserva TS_IMAGE_TAG"
+  printf 'TS_IMAGE_TAG=v1.100.0\n' >> "$ENVF"      # una elección real (distinta de la del repo y de "stable") SÍ se conserva
+  run_migration >/dev/null 2>&1
+  assert_eq "una versión elegida se conserva" "v1.100.0" "$(dotenv TS_IMAGE_TAG)"
+}
+
 t_after_the_migration_tools_marks_the_kept_pin_as_an_override() {
   load_tools; [[ -f "$MIGRATION" ]] || { nok "falta la migración 003"; return 0; }
   printf 'PI_VERSION=0.70.0\n' >> "$ENVF"; run_migration >/dev/null
@@ -407,7 +420,7 @@ for t in t_tools_shows_the_table_with_outdated_tools t_tools_enter_means_no_chan
          t_menu_shows_the_notice_and_the_new_option t_main_dispatches_the_tools_command t_help_and_aiws_know_about_tools \
          t_a_fresh_dotenv_copied_from_env_example_has_no_pins t_migration_removes_pins_equal_to_the_repo_defaults_and_keeps_the_rest \
          t_migration_handles_the_herdr_group_as_a_unit t_migration_is_idempotent_and_survives_a_missing_dotenv \
-         t_after_the_migration_tools_marks_the_kept_pin_as_an_override t_tools_menu_notice_and_migration_work_without_perl; do
+         t_after_the_migration_tools_marks_the_kept_pin_as_an_override t_tools_menu_notice_and_migration_work_without_perl t_migration_removes_the_former_floating_default_of_tailscale; do
   run "$t"
 done
 
