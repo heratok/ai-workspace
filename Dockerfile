@@ -6,7 +6,7 @@ ARG UV_VERSION=0.13.0
 # Docker no expande variables en "COPY --from=": uv va como etapa propia
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
-FROM debian:12-slim
+FROM debian:13-slim
 # Etiqueta para que "setup.sh clean" borre solo imágenes viejas de este proyecto
 LABEL org.ai-workspace.image="true"
 
