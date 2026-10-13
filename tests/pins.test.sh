@@ -98,9 +98,16 @@ t_dependabot_watches_docker_and_compose() {
   assert_has "docker-compose" "$body" 'package-ecosystem: docker-compose'
 }
 
+t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (repos bookworm-pgdg/Microsoft): migración planificada aparte
+  local blk; blk="$(awk '/package-ecosystem: docker$/ {on=1; next} /package-ecosystem:/ {on=0} on' "$DEPENDABOT")"
+  grep -q 'dependency-name: debian' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar debian"
+  grep -q 'version-update:semver-major' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar solo los saltos de versión mayor de debian"
+  grep -q '^[[:space:]]*#.*debian-13-migration' "$DEPENDABOT" && ok || nok "la regla debe apuntar a odd/tasks/debian-13-migration.md en un comentario"
+}
+
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
          t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile \
-         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose; do
+         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps; do
   run "$t"
 done
 
