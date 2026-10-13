@@ -25,7 +25,7 @@
 #   (bases de datos locales: dentro del workspace usa "devdb help")
 #
 # Requisito único en el servidor: Docker + plugin "docker compose".
-# Variables del .env: ver env.example y README.md.
+# Variables del .env: ver env.example y docs/configuracion.md.
 # =============================================================================
 set -Eeuo pipefail
 

@@ -1,4 +1,4 @@
-# Variables: ver README.md -> "Variables del .env" y el archivo env.example
+# Variables: ver docs/configuracion.md -> "Variables del .env" y el archivo env.example
 name: ${AIWS_NAME:-ai-workspace}              # proyecto compose = nombre de la instancia (ver AIWS_INSTANCE en .env)
 
 services:
@@ -106,7 +106,7 @@ services:
 
     environment:
       FIX_OWNERSHIP: ${FIX_OWNERSHIP:-false}
-      # PostgreSQL y Redis corren DENTRO del workspace con "devdb" (ver README).
+      # PostgreSQL y Redis corren DENTRO del workspace con "devdb" (ver docs/herramientas.md).
       # Solo SQL Server (opcional) va en contenedor aparte: no puede ejecutarse sin root.
       SQLCMDSERVER: mssql
       SQLCMDUSER: sa
