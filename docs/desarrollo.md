@@ -19,3 +19,24 @@ Cada push a `main`, cada pull request y la ejecución manual pasan por `.github/
 3. Pasa a `config/extra-root.sh` las herramientas que instalabas a mano, apuntando a `/usr/local/bin`.
 4. Ejecuta `./setup.sh install`.
 5. Actualiza tus clientes: `ssh ai@ai-workspace` en el puerto 22. El puerto 2222 y la IP fija anterior ya no se usan.
+
+## Estructura de `setup.sh`
+
+`setup.sh` es solo la puerta de entrada (encabezado de ayuda, rutas globales, carga de módulos, menú y `main`). La lógica vive en `lib/`, y **el orden de carga importa** porque cada módulo ejecuta sus asignaciones globales al cargarse:
+
+| Módulo | Contenido |
+|--------|-----------|
+| `lib/common.sh` | Mensajes (`info`/`warn`/`die`), `compose`, lectura y escritura del `.env`, registro de instancias |
+| `lib/instances.sh` | Nombres de instancia y alias, propiedad de la carpeta, verificaciones previas (`check_files`) |
+| `lib/config.sh` | `.env`, secretos y volúmenes |
+| `lib/lifecycle.sh` | Construir, levantar, esperar servicios, claves SSH y resumen |
+| `lib/background.sh` | Procesos en segundo plano, instalación/actualización y enlace `aiws` |
+| `lib/resources.sh` | Recursos por instancia (memoria y CPUs) |
+| `lib/components.sh` | Componentes de la imagen seleccionables |
+| `lib/maintenance.sh` | Migraciones, limpieza, `upgrade` y `rollback` |
+| `lib/backup.sh` | Respaldo y restauración |
+| `lib/uninstall.sh` | Desinstalación |
+
+Para añadir un módulo: crea `lib/nombre.sh` con `# shellcheck shell=bash` en la cabecera, cárgalo en `setup.sh` (en la posición correcta), añádelo a `check_files` y a la lista de `tests/modules.test.sh`. `setup.sh` termina con `main "$@"; exit` a propósito: `upgrade` reemplaza el archivo mientras corre y bash no debe leer ni un byte más después.
+
+ShellCheck corre en el CI como contenedor fijado (`koalaman/shellcheck:v0.11.0`) a nivel `warning` y con `-x`, para seguir los `source` y analizar los módulos como un conjunto.

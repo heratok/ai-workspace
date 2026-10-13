@@ -22,12 +22,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Sintaxis bash
         run: |
-          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh tests/*.sh; do
+          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh lib/*.sh tests/*.sh; do
             bash -n "$f" && echo "ok $f"
           done
           sh -n config/env.sh
-      - name: ShellCheck (solo errores)
-        run: shellcheck -S error install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh tests/instances.test.sh tests/aiws.test.sh tests/guide.test.sh tests/fetch-script.test.sh tests/pins.test.sh tests/restore.test.sh tests/hardening.test.sh tests/security.test.sh tests/docs.test.sh
+      - name: ShellCheck (nivel warning, siguiendo los módulos de lib/)
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh tests/*.test.sh
       - name: Pruebas de multi-instancia
         run: bash tests/instances.test.sh
       - name: Pruebas del comando aiws

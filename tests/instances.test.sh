@@ -62,7 +62,7 @@ case "${1:-}" in
 esac
 EOF
   chmod +x "$SB/bin/docker"
-  cp "$ROOT/setup.sh" "$ROOT/env.example" "$SB/repo/"
+  cp -r "$ROOT/setup.sh" "$ROOT/lib" "$ROOT/env.example" "$SB/repo/"
   unset XDG_DATA_HOME
   export HOME="$SB/home" FAKE_DOCKER_DIR="$SB/fake" PATH="$SB/bin:$PATH"
 }
@@ -295,7 +295,7 @@ if [[ "$1" == clone ]]; then
   d="${*: -1}"; mkdir -p "$d"
   (cd "$AIWS_TEST_ROOT" && tar cf - --exclude=.git --exclude=odd --exclude=tests --exclude=landing --exclude=node_modules --exclude=logs --exclude=backups --exclude=.env .) | tar xf - -C "$d"
   mkdir -p "$d/.git"
-  sed -i 's#\[\[ -c /dev/net/tun \]\] || die.*#true#' "$d/setup.sh"
+  sed -i 's#\[\[ -c /dev/net/tun \]\] || die.*#true#' "$d/setup.sh" "$d"/lib/*.sh
 fi
 exit 0
 EOF
@@ -950,10 +950,14 @@ t_setup_sizing_existing_env_untouched() {
   has_tty() { return 1; }
   export AIWS_HOST_MEM_KB=4194304 AIWS_HOST_CPUS=2
   cp "$SB/repo/env.example" "$ENV_FILE"; env_set MEM_LIMIT 8g; env_set CPUS 4
-  SIZE_MEM=""; SIZE_CPUS=""
+  # shellcheck disable=SC2034  # SIZE_MEM y SIZE_CPUS los lee configure_env del setup.sh cargado con source
+  SIZE_MEM=""
+  # shellcheck disable=SC2034  # lo lee configure_env del setup.sh cargado con source
+  SIZE_CPUS=""
   configure_env "tskey-auth-t" </dev/null >/dev/null 2>&1
   assert_eq "no cambia MEM_LIMIT" "8g" "$(env_get MEM_LIMIT)"
   assert_eq "no cambia CPUS" "4" "$(env_get CPUS)"
+  # shellcheck disable=SC2034  # lo lee configure_env del setup.sh cargado con source
   SIZE_MEM=3g
   configure_env "tskey-auth-t" </dev/null >/dev/null 2>&1
   assert_eq "un --mem explícito sí se aplica" "3g" "$(env_get MEM_LIMIT)"

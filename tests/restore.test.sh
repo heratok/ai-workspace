@@ -61,7 +61,7 @@ case "${1:-}" in
 esac
 EOF
   chmod +x "$SB/bin/docker"
-  cp "$ROOT/setup.sh" "$ROOT/env.example" "$SB/repo/"
+  cp -r "$ROOT/setup.sh" "$ROOT/lib" "$ROOT/env.example" "$SB/repo/"
   unset XDG_DATA_HOME
   export HOME="$SB/home" FAKE_DOCKER_DIR="$SB/fake" FAKE_BACKUP_DIR="$SB/repo/backups" PATH="$SB/bin:$PATH"
 }
