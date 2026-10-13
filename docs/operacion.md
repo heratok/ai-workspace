@@ -14,7 +14,8 @@ Se ejecutan desde la carpeta de la instancia (`./setup.sh COMANDO` o `bash setup
 | `install` | Instala o reinstala todo. Con `--alias NOMBRE` crea una instancia aislada (lo normal es usar `install.sh`). También acepta `--authkey`, `--pubkey`, `--mem`, `--cpus` y `--foreground` |
 | `progress` | Ver en vivo el progreso (o el resultado) de la última instalación o actualización, por ejemplo tras reconectar |
 | `upgrade` | **Descarga lo último de GitHub**, migra y reconstruye (ver [Actualizar](#actualizar-a-la-última-versión)) |
-| `update` | Reconstruye la imagen sin caché, con versiones nuevas |
+| `update` | Reconstruye la imagen sin caché **con las versiones fijadas** (las de tu `.env` o, si no hay, las del repo). `agy` siempre trae la última. Para versiones nuevas de las herramientas, usa `tools` |
+| `tools [--yes] [--reset]` | Busca versiones nuevas de las herramientas (npm y GitHub), muestra una tabla con lo que hay en la imagen, lo fijado y lo último, y te deja elegir cuáles aplicar: se guardan en el `.env` (nunca en los archivos del repo) y ofrece reconstruir. `--yes` aplica todo y reconstruye; `--reset` quita las versiones del `.env` y vuelve a las del repo. Al abrir el menú avisa si hay versiones nuevas (opción 11) |
 | `rollback` | Vuelve a la versión anterior al último `upgrade` y reconstruye |
 | `components` | Elige qué agentes y herramientas trae la imagen (y reconstruye) |
 | `resources [--mem 4g --cpus 2 ...]` | Ver límites y uso real, o cambiarlos sin reconstruir (`--set` pregunta cada valor, `--no-apply` solo guarda) |

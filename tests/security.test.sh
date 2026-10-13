@@ -68,7 +68,7 @@ t_ci_step_names_are_valid_yaml() {      # "name: texto: otro" sin comillas rompe
 
 t_every_test_script_is_shellchecked() {   # un script que ShellCheck no revisa puede esconder errores de shell
   local f n d line; line="$(grep -E 'koalaman/shellcheck' "$CI")"
-  for f in "$ROOT"/tests/*.test.sh "$ROOT"/scripts/*.sh; do
+  for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/helpers/*.sh "$ROOT"/scripts/*.sh; do
     [[ -f "$f" ]] || continue
     d="$(basename "$(dirname "$f")")"; n="$d/$(basename "$f")"
     [[ "$line" == *"$n"* || "$line" == *"$d/*.test.sh"* || "$line" == *"$d/*.sh"* ]] && ok || nok "$n no está en la lista de ShellCheck de ci.yml"

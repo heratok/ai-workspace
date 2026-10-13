@@ -49,6 +49,7 @@ AIWS_CMDS=(
   "logs|single|Sigue los registros de los contenedores|aiws logs santiago"
   "psql|single|Abre psql contra el PostgreSQL local del workspace|aiws psql santiago"
   "components|single|Elige qué agentes y herramientas trae la imagen|aiws components santiago"
+  "tools|single|Busca versiones nuevas de las herramientas de la instancia y eliges cuáles aplicar (se guardan en su .env)|aiws tools santiago"
   "add-key|single|Autoriza una clave SSH (pegada, RUTA.pub o github:usuario)|aiws add-key santiago github:usuario"
   "migrate|single|Aplica las migraciones pendientes|aiws migrate santiago"
   "progress|single|Muestra el progreso de la última instalación o actualización|aiws progress santiago"

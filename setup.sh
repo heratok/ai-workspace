@@ -19,6 +19,7 @@
 #                                    Autoriza una clave SSH (sin argumento: la pide para pegar)
 #   ./setup.sh backup                Respalda home + proyectos en ./backups (con checksum)
 #   ./setup.sh restore [ARCHIVO] [--yes]  Restaura un respaldo (por defecto el más reciente; hace antes uno de seguridad)
+#   ./setup.sh tools [--yes] [--reset]  Busca versiones nuevas de las herramientas, eliges cuáles aplicar (se guardan en .env) y reconstruye
 #   ./setup.sh uninstall [--yes]     Quita contenedores e imagen; CONSERVA datos
 #   ./setup.sh uninstall --all       Borra TODO: datos, volúmenes, .env, nodo Tailscale
 #   ./setup.sh status | logs | shell | psql | doctor | ts-status | down
@@ -67,6 +68,8 @@ source "$SCRIPT_DIR/lib/maintenance.sh"
 source "$SCRIPT_DIR/lib/backup.sh"
 # shellcheck source=lib/uninstall.sh
 source "$SCRIPT_DIR/lib/uninstall.sh"
+# shellcheck source=lib/tools.sh
+source "$SCRIPT_DIR/lib/tools.sh"
 
 # Muestra el encabezado de este archivo (hasta la línea de cierre "# ====")
 usage() { awk 'NR >= 3 { if ($0 ~ /^# =+$/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }
@@ -77,6 +80,7 @@ menu() {
   echo
   echo "${c_ok}${AIWS_NAME}${c_off} — ¿qué quieres hacer?"
   if [[ -d "$SCRIPT_DIR/.git" ]]; then echo "  versión: $(g log -1 --format='%h %s (%cr)' 2>/dev/null)"; fi
+  tools_notice || true   # "N herramientas con versión nueva" (caché, tope de 4 s, silencioso si falla)
   if [[ "$running" == true ]]; then
     echo "  ${c_warn}>> Hay una instalación/actualización EN CURSO (PID $(cat "$PID_FILE")). Usa la opción 3 para verla.${c_off}"
   fi
@@ -91,6 +95,7 @@ menu() {
   8) Limpiar (imágenes viejas, logs y respaldos antiguos)
   9) Desinstalar (conserva datos)
  10) Desinstalar TODO (borra datos)
+ 11) Buscar actualizaciones de herramientas
   0) Salir
 EOF
   local opt def=""; [[ "$running" == true ]] && def=3
@@ -107,6 +112,7 @@ EOF
     8) main clean ;;
     9) main uninstall ;;
     10) main uninstall --all ;;
+    11) main tools ;;
     *) info "Nada que hacer." ;;
   esac
 }
@@ -167,6 +173,7 @@ main() {
     ts-status) docker exec "$TS_CONTAINER" tailscale status ;;
     backup)    check_prereqs; backup ;;
     restore)   check_prereqs; restore "$@" ;;
+    tools)     tools_cmd "$@" ;;
     uninstall) check_prereqs; uninstall "$@" ;;
     purge)     check_prereqs; uninstall --all "$@" ;;
     down)      compose down; info "Contenedores detenidos. Volúmenes (datos e identidad Tailscale) se conservan." ;;

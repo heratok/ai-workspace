@@ -652,7 +652,7 @@ t_help_resources() {
 
 # ================================================================== ayuda
 # Subcomandos reales de setup.sh que aiws debe poder delegar (si setup.sh suma uno, hay que sumarlo aquí y en aiws)
-EXPECTED_CMDS=(ls resources upgrade update status doctor ts-status backup restore shell logs psql components add-key migrate progress down rollback clean uninstall purge help)
+EXPECTED_CMDS=(ls resources upgrade update status doctor ts-status backup restore tools shell logs psql components add-key migrate progress down rollback clean uninstall purge help)
 
 t_help_general() {
   load_aiws; three

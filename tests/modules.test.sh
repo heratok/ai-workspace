@@ -28,7 +28,7 @@ run() {
   return 0
 }
 
-MODULES=(common instances config lifecycle background resources components maintenance backup uninstall)
+MODULES=(common instances config lifecycle background resources components maintenance backup uninstall tools)
 
 # Funciones que existían en el setup.sh monolítico (ninguna puede perderse ni duplicarse al mover)
 BASELINE_FUNCTIONS="

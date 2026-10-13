@@ -32,6 +32,8 @@ ARG HERDR_VERSION=0.9.4
 ARG HERDR_SHA256_AMD64=493304fbefb0ed0ea0455f373b47f48d24e8774bc7974f4c916ad2e937675b23
 ARG HERDR_SHA256_ARM64=9511cb70982c1ef115f232058e7ed7cf9640aa5a2c0ca78934cefda3aeb093fd
 ARG GENTLE_AI_VERSION=4.1.1
+# Doppler: release de GitHub verificada con su checksums.txt (antes: repo apt sin versión).
+ARG DOPPLER_VERSION=3.77.0
 # --- Componentes (se eligen con "./setup.sh components"; true/false) ---
 ARG INSTALL_CLAUDE=true
 ARG INSTALL_PI=true
@@ -83,13 +85,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
  && echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list \
  && pkgs=(gh "postgresql-client-${PG_MAJOR}" libpq-dev) \
- && if [[ "${INSTALL_DOPPLER}" == "true" ]]; then \
-      curl -fsSL --retry 3 'https://packages.doppler.com/public/cli/gpg.DE2A7741A397C129.key' \
-        | gpg --dearmor -o /etc/apt/keyrings/doppler.gpg \
-   && echo "deb [signed-by=/etc/apt/keyrings/doppler.gpg] https://packages.doppler.com/public/cli/deb/debian any-version main" \
-        > /etc/apt/sources.list.d/doppler-cli.list \
-   && pkgs+=(doppler); \
-    fi \
  && if [[ "${INSTALL_PG_SERVER}" == "true" ]]; then \
       install -d /etc/postgresql-common \
    && echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf \
@@ -197,6 +192,20 @@ RUN if [[ "${INSTALL_GENTLE_AI}" == "true" ]]; then \
    && rm -f "${f}" \
    && gentle-ai --version; \
     fi
+# Doppler CLI: tarball de su release fijada verificado con el checksums.txt de esa release (antes: repo apt sin versión)
+RUN if [[ "${INSTALL_DOPPLER}" == "true" ]]; then \
+      f="doppler_${DOPPLER_VERSION}_linux_$(dpkg --print-architecture).tar.gz" \
+   && base="https://github.com/DopplerHQ/cli/releases/download/${DOPPLER_VERSION}" \
+   && cd /tmp \
+   && curl -fsSLO --retry 3 "${base}/${f}" \
+   && curl -fsSL --retry 3 "${base}/checksums.txt" | grep " ${f}\$" | sha256sum -c - \
+   && tar -xzf "${f}" -C /usr/local/bin doppler \
+   && rm -f "${f}" \
+   && doppler --version; \
+    fi
+# Antigravity CLI (agy): SIEMPRE la última al construir. Decisión: Google no publica un listado de versiones ni
+# URLs predecibles (el bucket no se puede listar y cada build lleva un id impredecible), así que no se fija.
+# Su instalador verifica el SHA-512 del manifiesto. "./setup.sh update" (sin caché) la renueva.
 # fetch-script.sh: el CDN de Google a veces entrega el instalador en gzip sin avisar
 COPY --chmod=755 config/fetch-script.sh /tmp/fetch-script.sh
 RUN if [[ "${INSTALL_AGY}" == "true" ]]; then \
@@ -254,6 +263,11 @@ RUN yn() { [[ "$1" == "true" ]] && echo sí || echo no; } \
       echo "- Servidor PostgreSQL en la imagen: $(yn "${INSTALL_PG_SERVER}") (si no, usa devdb install postgres)"; \
       echo "- sqlcmd (SQL Server tools): $(yn "${INSTALL_MSSQL_TOOLS}")"; \
     } >> /etc/ai-workspace/AGENTS.md
+
+# Versiones fijadas que contiene esta imagen: "./setup.sh tools" las lee para mostrar lo que hay REALMENTE instalado.
+# (UV_VERSION se declara antes del primer FROM; aquí se vuelve a declarar para verla en esta etapa.)
+ARG UV_VERSION
+LABEL org.ai-workspace.versions="claude-code=${CLAUDE_CODE_VERSION},pi=${PI_VERSION},opencode=${OPENCODE_VERSION},playwright=${PLAYWRIGHT_VERSION},playwright-cli=${PLAYWRIGHT_CLI_VERSION},playwright-mcp=${PLAYWRIGHT_MCP_VERSION},uv=${UV_VERSION},mise=${MISE_VERSION},herdr=${HERDR_VERSION},gentle-ai=${GENTLE_AI_VERSION},doppler=${DOPPLER_VERSION}"
 
 ENV WORKSPACE_USER=${USERNAME}
 WORKDIR /workspace

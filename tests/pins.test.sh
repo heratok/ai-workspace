@@ -34,7 +34,7 @@ run() {
 # ARG de Dockerfile -> valor por defecto
 default_of() { sed -n -E "s/^ARG $1=\"?([^\" ]*)\"?.*/\1/p" "$DOCKERFILE" | head -n1; }
 
-PIN_ARGS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PLAYWRIGHT_VERSION PLAYWRIGHT_CLI_VERSION PLAYWRIGHT_MCP_VERSION UV_VERSION MISE_VERSION HERDR_VERSION GENTLE_AI_VERSION)
+PIN_ARGS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PLAYWRIGHT_VERSION PLAYWRIGHT_CLI_VERSION PLAYWRIGHT_MCP_VERSION UV_VERSION MISE_VERSION HERDR_VERSION GENTLE_AI_VERSION DOPPLER_VERSION)
 SHA_ARGS=(HERDR_SHA256_AMD64 HERDR_SHA256_ARM64)
 ALL_PINS=("${PIN_ARGS[@]}" "${SHA_ARGS[@]}")
 
@@ -89,7 +89,7 @@ t_env_example_documents_every_pin() {
 }
 
 t_tailscale_tag_is_not_stable() {
-  local tag; tag="$(sed -n -E 's/^TS_IMAGE_TAG=(.*)/\1/p' "$ENVEX" | head -n1)"
+  local tag; tag="$(sed -n -E 's/^(# )?TS_IMAGE_TAG=(.*)/\2/p' "$ENVEX" | head -n1)"
   assert_match "TS_IMAGE_TAG en env.example" "$tag" '^v[0-9]+\.[0-9]+\.[0-9]+$'
   grep -qE 'TS_IMAGE_TAG:-v[0-9]+\.[0-9]+\.[0-9]+' "$COMPOSE" && ok || nok "compose no usa un tag fijo de tailscale por defecto"
 }
@@ -120,6 +120,38 @@ t_herdr_and_gentle_ai_are_not_installed_with_live_scripts() {
   [[ "$(grep -cE 'sha256sum -c' <<< "$body")" -ge 3 ]] && ok || nok "debe verificarse con sha256sum -c: node, herdr y gentle-ai (mínimo 3 usos)"
 }
 
+t_doppler_is_installed_from_its_pinned_release_not_apt() {
+  local body; body="$(<"$DOCKERFILE")"
+  if grep -qE 'packages.doppler.com' <<< "$body"; then nok "Doppler no debe instalarse desde su repo apt (sin versión)"; else ok; fi
+  assert_has "doppler por release" "$body" 'DopplerHQ/cli/releases/download/${DOPPLER_VERSION}'
+  assert_has "checksums de doppler" "$body" 'checksums.txt'
+}
+
+t_agy_always_installs_the_latest() {   # decisión: agy no se fija (Google no lista versiones ni da URLs predecibles)
+  local body; body="$(<"$DOCKERFILE")"
+  assert_has "instalador de agy" "$body" 'antigravity.google/cli/install.sh'
+  if grep -qE 'ARG AGY_' <<< "$body"; then nok "agy no debe tener ARG de versión: siempre instala la última"; else ok; fi
+}
+
+t_image_label_lists_every_pinned_tool() {   # `./setup.sh tools` lee esta etiqueta para mostrar lo que hay REALMENTE en la imagen
+  local body id; body="$(<"$DOCKERFILE")"
+  assert_has "etiqueta" "$body" 'LABEL org.ai-workspace.versions='
+  for id in claude-code pi opencode playwright playwright-cli playwright-mcp uv mise herdr gentle-ai doppler; do
+    grep -qE "org\.ai-workspace\.versions=.*[\",]${id}=\\$\{[A-Z_]+_VERSION\}" <<< "$body" && ok || nok "la etiqueta de versiones no incluye $id"
+  done
+}
+
+t_env_example_pins_are_commented_out() {
+  # setup.sh crea el .env COPIANDO env.example y "upgrade" le agrega las claves que falten: si las versiones fijadas
+  # estuvieran activas, cada servidor las congelaría para siempre y nunca recibiría los cambios del repo.
+  # Van comentadas (solo documentan el valor por defecto); "./setup.sh tools" escribe un valor real cuando eliges uno.
+  local a
+  for a in "${ALL_PINS[@]}" TS_IMAGE_TAG; do
+    if grep -qE "^$a=" "$ENVEX"; then nok "$a está activa en env.example: se copiaría al .env y congelaría el servidor (debe ir comentada: '# $a=...')"; else ok; fi
+    grep -qE "^# $a=" "$ENVEX" && ok || nok "$a debe documentarse como '# $a=valor' en env.example"
+  done
+}
+
 t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (repos bookworm-pgdg/Microsoft): migración planificada aparte
   local blk; blk="$(awk '/package-ecosystem: docker$/ {on=1; next} /package-ecosystem:/ {on=0} on' "$DEPENDABOT")"
   grep -q 'dependency-name: debian' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar debian"
@@ -129,7 +161,7 @@ t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (
 
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
          t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile \
-         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts; do
+         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out; do
   run "$t"
 done
 
