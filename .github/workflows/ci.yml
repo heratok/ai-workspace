@@ -7,6 +7,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Cada lunes: reconstruye y escanea aunque nadie haga push (aparecen CVE nuevas sin cambios de código)
+    - cron: '0 6 * * 1'
 
 permissions:
   contents: read
@@ -67,6 +70,20 @@ jobs:
           grep -qE 'pids_limit: 4096' res.out || { echo "PIDS_LIMIT no se aplica"; exit 1; }
           grep -qE 'shm_size: .?(1g|1073741824)' res.out || { echo "SHM_SIZE no se aplica"; exit 1; }
 
+  # Escaneo de seguridad del repo. Herramientas como contenedores FIJADOS por versión (Dependabot no ve
+  # las versiones dentro de "run:": súbelas a mano). Excepciones documentadas en .hadolint.yaml y .trivyignore.
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Hadolint (Dockerfile; falla solo con errores)
+        run: docker run --rm -i -v "$PWD/.hadolint.yaml:/cfg.yaml:ro" hadolint/hadolint:v2.15.1 hadolint --config /cfg.yaml --failure-threshold error - < Dockerfile
+      - name: Trivy (secretos, dependencias y configuración; HIGH/CRITICAL con corrección)
+        run: docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.75.0 fs --quiet --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /src/.trivyignore --exit-code 1 /src
+      - name: Pruebas de la configuración de seguridad
+        run: bash tests/security.test.sh
+
   build:
     needs: lint
     runs-on: ubuntu-24.04
@@ -75,6 +92,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Construir imagen
         run: docker build --progress=plain -t ai-workspace:ci .
+      - name: Escanear la imagen (CVE HIGH/CRITICAL con corrección; solo informe por ahora)
+        # Sin baseline medido de la imagen completa: no bloquea. Cuando las primeras ejecuciones
+        # muestren el estado real, pasar CRITICAL a --exit-code 1 (ver odd/tasks/security-scan.md).
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 ai-workspace:ci
       - name: Verificar herramientas dentro de la imagen
         run: |
           docker run --rm --entrypoint zsh ai-workspace:ci -lc '
