@@ -34,7 +34,9 @@ run() {
 # ARG de Dockerfile -> valor por defecto
 default_of() { sed -n -E "s/^ARG $1=\"?([^\" ]*)\"?.*/\1/p" "$DOCKERFILE" | head -n1; }
 
-PIN_ARGS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PLAYWRIGHT_VERSION PLAYWRIGHT_CLI_VERSION PLAYWRIGHT_MCP_VERSION UV_VERSION MISE_VERSION)
+PIN_ARGS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PLAYWRIGHT_VERSION PLAYWRIGHT_CLI_VERSION PLAYWRIGHT_MCP_VERSION UV_VERSION MISE_VERSION HERDR_VERSION GENTLE_AI_VERSION)
+SHA_ARGS=(HERDR_SHA256_AMD64 HERDR_SHA256_ARM64)
+ALL_PINS=("${PIN_ARGS[@]}" "${SHA_ARGS[@]}")
 
 t_every_pin_arg_has_a_concrete_default() {
   local a v
@@ -65,14 +67,14 @@ t_uv_and_mise_are_pinned() {
 
 t_compose_forwards_every_pin() {
   local a
-  for a in "${PIN_ARGS[@]}"; do
+  for a in "${ALL_PINS[@]}"; do
     grep -qE "^[[:space:]]+$a: \\\$\{$a:-" "$COMPOSE" && ok || nok "compose no reenvía $a"
   done
 }
 
 t_compose_defaults_match_dockerfile() {
   local a d c
-  for a in "${PIN_ARGS[@]}"; do
+  for a in "${ALL_PINS[@]}"; do
     d="$(default_of "$a")"
     c="$(sed -n -E "s/^[[:space:]]+$a: \\\$\{$a:-([^}]*)\}.*/\1/p" "$COMPOSE" | head -n1)"
     [[ "$c" == "$d" ]] && ok || nok "$a: compose='$c' Dockerfile='$d'"
@@ -81,7 +83,7 @@ t_compose_defaults_match_dockerfile() {
 
 t_env_example_documents_every_pin() {
   local a
-  for a in "${PIN_ARGS[@]}"; do
+  for a in "${ALL_PINS[@]}"; do
     grep -qE "^#? ?$a=" "$ENVEX" && ok || nok "env.example no documenta $a"
   done
 }
@@ -98,6 +100,26 @@ t_dependabot_watches_docker_and_compose() {
   assert_has "docker-compose" "$body" 'package-ecosystem: docker-compose'
 }
 
+t_herdr_and_gentle_ai_checksums_are_pinned() {
+  local a v
+  for a in "${SHA_ARGS[@]}"; do
+    v="$(default_of "$a")"
+    assert_match "sha de $a" "$v" '^[0-9a-f]{64}$'
+  done
+}
+
+t_herdr_and_gentle_ai_are_not_installed_with_live_scripts() {
+  local body; body="$(<"$DOCKERFILE")"
+  # ni el script de herdr.dev ni el de la rama main de gentle-ai: se ejecutaban en vivo y siempre traían la última
+  if grep -qE 'herdr\.dev/install\.sh' <<< "$body"; then nok "Herdr no debe instalarse con herdr.dev/install.sh"; else ok; fi
+  if grep -qE 'gentle-ai/main/scripts/install\.sh' <<< "$body"; then nok "Gentle AI no debe instalarse con el script de la rama main"; else ok; fi
+  assert_has "binario de herdr" "$body" 'herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-'
+  assert_has "checksum de herdr" "$body" 'HERDR_SHA256_AMD64'
+  assert_has "archivo de gentle-ai" "$body" 'Gentleman-Programming/gentle-ai/releases/download/v${GENTLE_AI_VERSION}'
+  assert_has "checksums.txt de gentle-ai" "$body" 'checksums.txt'
+  [[ "$(grep -cE 'sha256sum -c' <<< "$body")" -ge 3 ]] && ok || nok "debe verificarse con sha256sum -c: node, herdr y gentle-ai (mínimo 3 usos)"
+}
+
 t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (repos bookworm-pgdg/Microsoft): migración planificada aparte
   local blk; blk="$(awk '/package-ecosystem: docker$/ {on=1; next} /package-ecosystem:/ {on=0} on' "$DEPENDABOT")"
   grep -q 'dependency-name: debian' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar debian"
@@ -107,7 +129,7 @@ t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (
 
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
          t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile \
-         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps; do
+         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts; do
   run "$t"
 done
 

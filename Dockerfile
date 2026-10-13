@@ -25,6 +25,13 @@ ARG PLAYWRIGHT_VERSION=1.64.0
 ARG PLAYWRIGHT_CLI_VERSION=0.1.22
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 ARG MISE_VERSION=v2026.10.8
+# Herdr y Gentle AI: binario de la release fijada, verificado con su checksum (sin ejecutar instaladores en vivo).
+# Herdr: SHA256 de cada binario (GitHub los publica como "digest"); Gentle AI: se verifica con el checksums.txt de su release.
+# Cámbialos con scripts/update-pins.sh (list / choose / set / latest), no a mano.
+ARG HERDR_VERSION=0.9.4
+ARG HERDR_SHA256_AMD64=493304fbefb0ed0ea0455f373b47f48d24e8774bc7974f4c916ad2e937675b23
+ARG HERDR_SHA256_ARM64=9511cb70982c1ef115f232058e7ed7cf9640aa5a2c0ca78934cefda3aeb093fd
+ARG GENTLE_AI_VERSION=4.1.1
 # --- Componentes (se eligen con "./setup.sh components"; true/false) ---
 ARG INSTALL_CLAUDE=true
 ARG INSTALL_PI=true
@@ -160,23 +167,35 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
  && mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}"
 
 # ---------------------------------------------------------------------------
-# 6. Herdr (instalador oficial: verifica SHA-256, no toca archivos rc)
+# 6. Herdr: binario de la release fijada (HERDR_VERSION) verificado con su SHA-256.
 #    Se instala en /usr/local/bin para que sobreviva al volumen ai_home.
 # ---------------------------------------------------------------------------
 RUN if [[ "${INSTALL_HERDR}" == "true" ]]; then \
-      curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh \
-   && ls -l /usr/local/bin/herdr*; \
+      case "$(dpkg --print-architecture)" in \
+        amd64) a=x86_64; sha="${HERDR_SHA256_AMD64}" ;; \
+        arm64) a=aarch64; sha="${HERDR_SHA256_ARM64}" ;; \
+        *) echo "arquitectura no soportada"; exit 1 ;; \
+      esac \
+   && curl -fsSL --retry 3 -o /usr/local/bin/herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${a}" \
+   && echo "${sha}  /usr/local/bin/herdr" | sha256sum -c - \
+   && chmod 0755 /usr/local/bin/herdr \
+   && herdr --version; \
     fi
 
 # ---------------------------------------------------------------------------
-# 6a. Gentle AI (instalador oficial, binario de GitHub Releases con checksum)
+# 6a. Gentle AI: archivo de la release fijada (GENTLE_AI_VERSION) verificado con el checksums.txt de esa release
 #     y Antigravity CLI "agy" (instalador oficial; instala en ~/.local/bin, se mueve
 #     a /usr/local/bin para que no lo oculte el volumen ai_home)
 # ---------------------------------------------------------------------------
 RUN if [[ "${INSTALL_GENTLE_AI}" == "true" ]]; then \
-      curl -fsSL https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/scripts/install.sh \
-        | bash -s -- --method binary --dir /usr/local/bin \
-   && /usr/local/bin/gentle-ai --version; \
+      f="gentle-ai_${GENTLE_AI_VERSION}_linux_$(dpkg --print-architecture).tar.gz" \
+   && base="https://github.com/Gentleman-Programming/gentle-ai/releases/download/v${GENTLE_AI_VERSION}" \
+   && cd /tmp \
+   && curl -fsSLO --retry 3 "${base}/${f}" \
+   && curl -fsSL --retry 3 "${base}/checksums.txt" | grep " ${f}\$" | sha256sum -c - \
+   && tar -xzf "${f}" -C /usr/local/bin gentle-ai \
+   && rm -f "${f}" \
+   && gentle-ai --version; \
     fi
 # fetch-script.sh: el CDN de Google a veces entrega el instalador en gzip sin avisar
 COPY --chmod=755 config/fetch-script.sh /tmp/fetch-script.sh

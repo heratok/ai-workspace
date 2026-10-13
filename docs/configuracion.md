@@ -105,3 +105,27 @@ Validaciones: memoria y `/dev/shm` como `512m`, `4g` o `1.5g` (sin distinguir ma
 - **Primera instalación:** el script pregunta *"¿Instalación completa o personalizada?"*. Si eliges la personalizada, muestra este menú.
 - **Después:** cambia la selección cuando quieras. El script guarda en `.env` (`INSTALL_*=true/false`) y ofrece reconstruir. Lo que desmarcas desaparece de la imagen; tus datos no se tocan.
 - **La base siempre viene:** git, gh, Node, Python/uv, mise, clientes de bases de datos, devdb, zsh y las herramientas de terminal.
+
+### Versiones fijadas de la imagen
+
+Para que dos builds del mismo commit den la misma imagen, las herramientas llevan su versión fijada (en el `Dockerfile`, reenviada por `docker-compose.yml` y documentada en `env.example`). Puedes sobrescribirlas en tu `.env` y aplicar con `./setup.sh update`; `latest` vuelve a flotar (no reproducible).
+
+| Variable | Qué fija |
+|----------|----------|
+| `CLAUDE_CODE_VERSION`, `PI_VERSION`, `OPENCODE_VERSION` | CLIs de npm |
+| `PLAYWRIGHT_VERSION`, `PLAYWRIGHT_CLI_VERSION`, `PLAYWRIGHT_MCP_VERSION` | Playwright y sus CLIs |
+| `UV_VERSION`, `MISE_VERSION`, `TS_IMAGE_TAG` | `uv`, `mise` y la imagen de Tailscale |
+| `HERDR_VERSION`, `HERDR_SHA256_AMD64`, `HERDR_SHA256_ARM64` | Binario de Herdr y el SHA-256 con el que se verifica |
+| `GENTLE_AI_VERSION` | Gentle AI (se verifica con el `checksums.txt` de su release) |
+
+Herdr y Gentle AI ya no se instalan ejecutando un script descargado en el momento: el build baja el binario de esa versión y comprueba su checksum. **No cambies a mano** las versiones ni los checksums de Herdr y Gentle AI: usa el script, que los mantiene consistentes en los tres archivos y calcula los checksums solo:
+
+```bash
+scripts/update-pins.sh list                # últimas 5 versiones estables de cada una (marca la fijada)
+scripts/update-pins.sh choose herdr        # muestra las últimas 5 y te deja elegir cuál fijar
+scripts/update-pins.sh set herdr 0.9.3     # fija una versión concreta
+scripts/update-pins.sh set gentle-ai 4.1.0
+scripts/update-pins.sh latest              # fija la última estable de ambas, sin preguntar
+```
+
+Después revisa el cambio con `git diff` y reconstruye (`./setup.sh update`); en un PR, el CI construye la imagen y comprueba que las herramientas funcionan. Siguen flotando `agy` (su instalador no permite fijar versión) y Doppler (paquete apt).

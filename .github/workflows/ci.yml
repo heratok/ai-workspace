@@ -22,12 +22,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Sintaxis bash
         run: |
-          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh lib/*.sh tests/*.sh; do
+          for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh lib/*.sh scripts/*.sh tests/*.sh; do
             bash -n "$f" && echo "ok $f"
           done
           sh -n config/env.sh
       - name: ShellCheck (nivel warning, siguiendo los módulos de lib/)
-        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh tests/*.test.sh
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh scripts/*.sh tests/*.test.sh
       - name: Pruebas de multi-instancia
         run: bash tests/instances.test.sh
       - name: Pruebas del comando aiws
@@ -40,6 +40,8 @@ jobs:
         run: bash tests/docs.test.sh
       - name: Pruebas de endurecimiento del compose
         run: bash tests/hardening.test.sh
+      - name: Pruebas de update-pins (listar y fijar versiones)
+        run: bash tests/update-pins.test.sh
       - name: Pruebas de versiones fijadas
         run: bash tests/pins.test.sh
       - name: Pruebas de la descarga de instaladores
