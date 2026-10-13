@@ -202,7 +202,7 @@ aiws help                                   # todos los comandos; aiws help upgr
 | Varias, solo lectura | `status`, `doctor`, `ts-status` | Uno o varios alias, o `--all`. Sin argumentos actúan sobre todas |
 | Ver o cambiar recursos | `resources` | Para ver: varios alias o `--all` (sin argumentos, todas). Para cambiar (`--mem`, `--cpus`, `--shm`, `--pids`, `--mssql-mem`, `--set`, `--no-apply`): una sola |
 | Una sola instancia | `shell`, `logs`, `psql`, `components`, `add-key`, `migrate`, `progress`, `down` | `aiws COMANDO ALIAS [opciones]` |
-| Destructivos, una sola | `rollback`, `clean`, `uninstall`, `purge` | No aceptan `--all` ni varios alias; `setup.sh` sigue pidiendo su confirmación |
+| Destructivos, una sola | `restore`, `rollback`, `clean`, `uninstall`, `purge` | No aceptan `--all` ni varios alias; `setup.sh` sigue pidiendo su confirmación |
 | Ayuda | `help` | `aiws help [COMANDO]` |
 
 - **Alias:** los de `aiws ls`. `default` (o `principal`) es la instancia principal. Un alias desconocido se rechaza antes de ejecutar nada.
@@ -330,7 +330,8 @@ Se ejecutan desde la carpeta de la instancia (`./setup.sh COMANDO` o `bash setup
 | `rollback` | Vuelve a la versión anterior al último `upgrade` y reconstruye |
 | `components` | Elige qué agentes y herramientas trae la imagen (y reconstruye) |
 | `resources [--mem 4g --cpus 2 ...]` | Ver límites y uso real, o cambiarlos sin reconstruir (`--set` pregunta cada valor, `--no-apply` solo guarda) |
-| `backup` | Respalda el home y los proyectos (incluidas las bases de `devdb`) en `./backups/*.tar.gz` |
+| `backup` | Respalda el home y los proyectos (incluidas las bases de `devdb`) en `./backups/*.tar.gz`, con su checksum `.sha256` |
+| `restore [ARCHIVO] [--yes]` | Restaura un respaldo (por defecto el más reciente de la instancia). Verifica el checksum, rechaza respaldos de otra instancia, **reemplaza** el contenido de home y proyectos y antes hace un respaldo de seguridad del estado actual. Si el workspace está corriendo lo detiene y lo vuelve a arrancar |
 | `clean [--deep]` | Limpia imágenes viejas, logs y respaldos antiguos |
 | `migrate` | Aplica manualmente las migraciones pendientes |
 | `add-key` | Autoriza una clave SSH. Sin argumento la pide para **pegar**; también acepta `'ssh-ed25519 AAAA...'`, `RUTA.pub` o `github:usuario` |
