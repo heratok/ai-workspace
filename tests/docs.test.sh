@@ -33,7 +33,7 @@ MD_FILES() { echo "$README"; local d; for d in "${DOC_FILES[@]}"; do echo "$DOCS
 # slugs de GitHub de todos los títulos de un archivo (un solo perl por archivo; ignora bloques de código)
 # minúsculas, sin signos (salvo - y _), espacios -> guiones; el resultado se guarda en caché
 anchors_of() {
-  local f="$1" c="$TMP/anchors.$(echo "$1" | tr '/:\' '___')"
+  local f="$1" c; c="$TMP/anchors.$(echo "$1" | tr "/:\\" "___")"
   [[ -f "$c" ]] || awk '/^```/ {c = !c; next} !c && /^#{1,6} / {sub(/^#+ +/, ""); print}' "$f" \
     | perl -CSD -Mutf8 -ne 's/`//g; $_ = lc; s/[^\p{L}\p{N} _\n-]//g; s/ /-/g; print' > "$c"
   cat "$c"

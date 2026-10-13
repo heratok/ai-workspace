@@ -46,7 +46,7 @@ mk_sandbox() {
   SB="$(mktemp -d "$TMP/sb.XXXXXX")"
   mkdir -p "$SB/ws" "$SB/etc"
   cp "$GUIDE_SRC" "$SB/etc/AGENTS.md" 2>/dev/null || echo "# guía de prueba" > "$SB/etc/AGENTS.md"
-  export AIWS_GUIDE_SRC="$SB/etc/AGENTS.md" AIWS_WORKSPACE_DIR="$SB/ws" AIWS_OWNER="$(id -u):$(id -g)"
+  AIWS_OWNER="$(id -u):$(id -g)"; export AIWS_GUIDE_SRC="$SB/etc/AGENTS.md" AIWS_WORKSPACE_DIR="$SB/ws" AIWS_OWNER
 }
 seed() { bash "$SEED" >/dev/null 2>&1; }
 

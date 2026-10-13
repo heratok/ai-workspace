@@ -101,7 +101,7 @@ deb_userspace_install() {
 
   mkdir -p "$dest"
   local deb; for deb in "$work"/*.deb; do dpkg-deb -x "$deb" "$dest"; done
-  ls "$work"/*.deb | xargs -n1 basename > "$dest/.devdb-packages"
+  local pkg; for pkg in "$work"/*.deb; do basename "$pkg"; done > "$dest/.devdb-packages"
   rm -rf "$work"
   info "Instalado en $dest"
 }
