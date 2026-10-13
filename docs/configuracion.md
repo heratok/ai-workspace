@@ -108,7 +108,9 @@ Validaciones: memoria y `/dev/shm` como `512m`, `4g` o `1.5g` (sin distinguir ma
 
 ### Versiones fijadas de la imagen
 
-Para que dos builds del mismo commit den la misma imagen, las herramientas llevan su versión fijada (en el `Dockerfile`, reenviada por `docker-compose.yml` y documentada en `env.example`). Puedes sobrescribirlas en tu `.env` y aplicar con `./setup.sh update`; `latest` vuelve a flotar (no reproducible).
+Para que dos builds del mismo commit den la misma imagen, las herramientas llevan su versión fijada (en el `Dockerfile`, reenviada por `docker-compose.yml`; `env.example` las documenta **comentadas**). El valor por defecto sale del repo, así que `./setup.sh upgrade` te trae las versiones nuevas que el repo vaya fijando.
+
+**Para usar otra versión solo en tu servidor**, usa `./setup.sh tools`: busca versiones nuevas, te muestra una tabla (en la imagen, fijada, última, origen) y guarda en tu `.env` lo que elijas; luego reconstruye con `./setup.sh update`. `./setup.sh tools --reset` quita esas versiones del `.env` y vuelve a las del repo. En la tabla, origen `.env` significa que esa versión es una elección de este servidor y el repo ya no la actualiza. `latest` en una variable de npm vuelve a flotar (no reproducible).
 
 | Variable | Qué fija |
 |----------|----------|
@@ -116,16 +118,19 @@ Para que dos builds del mismo commit den la misma imagen, las herramientas lleva
 | `PLAYWRIGHT_VERSION`, `PLAYWRIGHT_CLI_VERSION`, `PLAYWRIGHT_MCP_VERSION` | Playwright y sus CLIs |
 | `UV_VERSION`, `MISE_VERSION`, `TS_IMAGE_TAG` | `uv`, `mise` y la imagen de Tailscale |
 | `HERDR_VERSION`, `HERDR_SHA256_AMD64`, `HERDR_SHA256_ARM64` | Binario de Herdr y el SHA-256 con el que se verifica |
+| `DOPPLER_VERSION` | Doppler (release de GitHub, verificada con su `checksums.txt`; ya no se instala del repo apt) |
 | `GENTLE_AI_VERSION` | Gentle AI (se verifica con el `checksums.txt` de su release) |
 
-Herdr y Gentle AI ya no se instalan ejecutando un script descargado en el momento: el build baja el binario de esa versión y comprueba su checksum. **No cambies a mano** las versiones ni los checksums de Herdr y Gentle AI: usa el script, que los mantiene consistentes en los tres archivos y calcula los checksums solo:
+Herdr, Gentle AI y Doppler ya no se instalan ejecutando un script descargado en el momento: el build baja el binario de esa versión y comprueba su checksum. **No cambies a mano** los checksums de Herdr: usa `./setup.sh tools` (en un servidor) o `scripts/update-pins.sh` (en el repo), que mantienen la versión y sus checksums consistentes y los calculan solos.
+
+**Para quien mantiene el repo**, `scripts/update-pins.sh` reescribe `Dockerfile`, `docker-compose.yml` y `env.example` (`--target repo`, por defecto) o solo el `.env` de un servidor (`--target env`, lo que usa `./setup.sh tools`):
 
 ```bash
+scripts/update-pins.sh check               # compara lo fijado con lo último de cada herramienta
 scripts/update-pins.sh list                # últimas 5 versiones estables de cada una (marca la fijada)
 scripts/update-pins.sh choose herdr        # muestra las últimas 5 y te deja elegir cuál fijar
-scripts/update-pins.sh set herdr 0.9.3     # fija una versión concreta
-scripts/update-pins.sh set gentle-ai 4.1.0
-scripts/update-pins.sh latest              # fija la última estable de ambas, sin preguntar
+scripts/update-pins.sh set herdr 0.9.3     # fija una versión concreta (o "latest")
+scripts/update-pins.sh latest              # fija la última estable de todas, sin preguntar
 ```
 
-Después revisa el cambio con `git diff` y reconstruye (`./setup.sh update`); en un PR, el CI construye la imagen y comprueba que las herramientas funcionan. Siguen flotando `agy` (su instalador no permite fijar versión) y Doppler (paquete apt).
+Después revisa el cambio con `git diff` y abre un PR: el CI construye la imagen y comprueba que las herramientas funcionan. Solo `agy` flota a propósito: siempre instala la última al construir, porque Google no publica un listado de versiones ni URLs predecibles (su bucket no se puede listar y cada build lleva un id impredecible). `./setup.sh update` la renueva.

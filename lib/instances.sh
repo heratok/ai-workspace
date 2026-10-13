@@ -119,7 +119,7 @@ check_files() {
            config/env.sh config/zshrc config/skel/zshrc config/sshd-ai-workspace.conf \
            config/extra-root.sh config/ws-doctor config/devdb \
            lib/common.sh lib/instances.sh lib/config.sh lib/lifecycle.sh lib/background.sh \
-           lib/resources.sh lib/components.sh lib/maintenance.sh lib/backup.sh lib/uninstall.sh; do
+           lib/resources.sh lib/components.sh lib/maintenance.sh lib/backup.sh lib/uninstall.sh lib/tools.sh; do
     [[ -f "$f" ]] || missing+=("$f")
   done
   (( ${#missing[@]} == 0 )) || die "Faltan archivos (copia la carpeta completa de nuevo): ${missing[*]}"
