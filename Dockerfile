@@ -1,6 +1,11 @@
 # syntax=docker/dockerfile:1.7
 # Imagen "todo incluido": nada del sistema se instala a mano después.
 # Todo lo de sistema va en /usr/local u /opt (el volumen ai_home oculta /home/ai).
+# Versiones fijadas: builds reproducibles. Súbelas con un PR ("latest" para flotar).
+ARG UV_VERSION=0.13.0
+# Docker no expande variables en "COPY --from=": uv va como etapa propia
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 FROM debian:12-slim
 # Etiqueta para que "setup.sh clean" borre solo imágenes viejas de este proyecto
 LABEL org.ai-workspace.image="true"
@@ -12,6 +17,14 @@ ARG USER_GID=1000
 # Node: deja NODE_VERSION vacío para tomar la última del major, o fíjala (ej. 24.11.1)
 ARG NODE_MAJOR=24
 ARG NODE_VERSION=""
+# --- Versiones fijadas de las CLIs (vacío o "latest" = la última al construir) ---
+ARG CLAUDE_CODE_VERSION=2.1.296
+ARG PI_VERSION=0.73.1
+ARG OPENCODE_VERSION=1.19.0
+ARG PLAYWRIGHT_VERSION=1.64.0
+ARG PLAYWRIGHT_CLI_VERSION=0.1.22
+ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+ARG MISE_VERSION=v2026.10.8
 # --- Componentes (se eligen con "./setup.sh components"; true/false) ---
 ARG INSTALL_CLAUDE=true
 ARG INSTALL_PI=true
@@ -112,18 +125,18 @@ RUN case "$(dpkg --print-architecture)" in \
 # ---------------------------------------------------------------------------
 # 3. Gestores sin root: uv (Python) y mise (otros runtimes por usuario/proyecto)
 # ---------------------------------------------------------------------------
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
-RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
+COPY --from=uv /uv /uvx /usr/local/bin/
+RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh \
  && mise --version && uv --version
 
 # ---------------------------------------------------------------------------
 # 4. CLIs globales de npm horneadas en la imagen (/usr/local)
 # ---------------------------------------------------------------------------
 RUN pkgs=() \
- && if [[ "${INSTALL_CLAUDE}" == "true" ]];     then pkgs+=(@anthropic-ai/claude-code); fi \
- && if [[ "${INSTALL_PI}" == "true" ]];         then pkgs+=(@mariozechner/pi-coding-agent); fi \
- && if [[ "${INSTALL_OPENCODE}" == "true" ]];   then pkgs+=(opencode-ai); fi \
- && if [[ "${INSTALL_PLAYWRIGHT}" == "true" ]]; then pkgs+=(playwright @playwright/cli @playwright/mcp); fi \
+ && if [[ "${INSTALL_CLAUDE}" == "true" ]];     then pkgs+=("@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"); fi \
+ && if [[ "${INSTALL_PI}" == "true" ]];         then pkgs+=("@mariozechner/pi-coding-agent@${PI_VERSION:-latest}"); fi \
+ && if [[ "${INSTALL_OPENCODE}" == "true" ]];   then pkgs+=("opencode-ai@${OPENCODE_VERSION:-latest}"); fi \
+ && if [[ "${INSTALL_PLAYWRIGHT}" == "true" ]]; then pkgs+=("playwright@${PLAYWRIGHT_VERSION:-latest}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION:-latest}" "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION:-latest}"); fi \
  && read -ra extra <<< "${NPM_EXTRA_PACKAGES}" && pkgs+=("${extra[@]}") \
  && if (( ${#pkgs[@]} )); then \
       echo "npm global: ${pkgs[*]}" \

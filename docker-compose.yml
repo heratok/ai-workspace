@@ -6,7 +6,7 @@ services:
   # Tailscale (sidecar): única puerta de entrada. Nada se publica en el servidor.
   # ---------------------------------------------------------------------------
   tailscale:
-    image: tailscale/tailscale:${TS_IMAGE_TAG:-stable}
+    image: tailscale/tailscale:${TS_IMAGE_TAG:-v1.104.1}
     container_name: ${AIWS_NAME:-ai-workspace}-ts
     hostname: ${TS_HOSTNAME:-${AIWS_NAME:-ai-workspace}}          # nombre del equipo en tu tailnet
     restart: unless-stopped
@@ -51,6 +51,14 @@ services:
         USER_GID: ${USER_GID:-1000}
         NODE_MAJOR: ${NODE_MAJOR:-24}
         NODE_VERSION: ${NODE_VERSION:-}             # vacío = última del major
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.296}   # versiones fijadas (env.example)
+        PI_VERSION: ${PI_VERSION:-0.73.1}
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.19.0}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.64.0}
+        PLAYWRIGHT_CLI_VERSION: ${PLAYWRIGHT_CLI_VERSION:-0.1.22}
+        PLAYWRIGHT_MCP_VERSION: ${PLAYWRIGHT_MCP_VERSION:-0.0.83}
+        UV_VERSION: ${UV_VERSION:-0.13.0}
+        MISE_VERSION: ${MISE_VERSION:-v2026.10.8}
         # Componentes: ./setup.sh components (o editar .env) y luego ./setup.sh update
         INSTALL_CLAUDE: ${INSTALL_CLAUDE:-true}
         INSTALL_PI: ${INSTALL_PI:-true}
