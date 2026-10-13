@@ -8,6 +8,10 @@ PIN_KEYS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PLAYWRIGHT_VERSION PLA
           UV_VERSION MISE_VERSION TS_IMAGE_TAG GENTLE_AI_VERSION DOPPLER_VERSION)
 HERDR_KEYS=(HERDR_VERSION HERDR_SHA256_AMD64 HERDR_SHA256_ARM64)
 
+former_default() {   # valores por defecto ANTERIORES del repo (no eran una elección del usuario; se quitan igual)
+  case "$1" in TS_IMAGE_TAG) echo stable ;; esac
+}
+
 pin_repo_default() {   # valor por defecto del repo: ARG del Dockerfile o, si no hay, el valor por defecto en docker-compose.yml
   local k="$1" v
   v="$(sed -n -E "s/^ARG $k=\"?([^\" ]*)\"?.*/\1/p" "$SCRIPT_DIR/Dockerfile" | head -n1)"
@@ -21,7 +25,7 @@ if [[ -f "$ENV_FILE" ]]; then
   removed=0
   for k in "${PIN_KEYS[@]}"; do
     cur="$(env_get "$k")"; [[ -n "$cur" ]] || continue
-    if [[ "$cur" == "$(pin_repo_default "$k")" ]]; then
+    if [[ "$cur" == "$(pin_repo_default "$k")" || "$cur" == "$(former_default "$k")" ]]; then
       env_del "$k"; removed=$((removed + 1))
     else
       warn "  .env conserva $k=$cur (distinta de la del repo: $(pin_repo_default "$k")). Si no la elegiste tú: ./setup.sh tools --reset"
