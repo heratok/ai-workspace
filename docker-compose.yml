@@ -87,6 +87,18 @@ services:
 
     security_opt:
       - "no-new-privileges:true"
+    # Solo las capacidades que el entrypoint y sshd (root) usan de verdad; el usuario "ai" no tiene ninguna.
+    # Medido quitándolas una a una (ver odd/tasks/compose-hardening.md). Si una función nueva que corre como
+    # root falla con "Operation not permitted", añade aquí la capacidad concreta; no vuelvas a los valores por defecto.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN            # entrypoint: dueño de home/workspace y de ~/.ssh
+      - DAC_OVERRIDE     # root lee/escribe en volúmenes y directorios 700 del usuario
+      - FOWNER           # chmod/utimes sobre archivos del usuario (authorized_keys, dotfiles)
+      - SETGID           # sshd: separación de privilegios y cambio al usuario
+      - SETUID           # sshd: separación de privilegios y cambio al usuario
+      - SYS_CHROOT       # sshd: chroot de separación de privilegios (/run/sshd)
     mem_limit: ${MEM_LIMIT:-8g}
     cpus: ${CPUS:-4}
     pids_limit: ${PIDS_LIMIT:-2048}
