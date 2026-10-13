@@ -33,6 +33,8 @@ jobs:
         run: bash tests/guide.test.sh
       - name: Pruebas de restauración de respaldos
         run: bash tests/restore.test.sh
+      - name: Pruebas de endurecimiento del compose
+        run: bash tests/hardening.test.sh
       - name: Pruebas de versiones fijadas
         run: bash tests/pins.test.sh
       - name: Pruebas de la descarga de instaladores

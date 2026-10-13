@@ -5,6 +5,7 @@ Entorno de desarrollo aislado en Docker para trabajar con agentes de IA, accesib
 - Lo del sistema se instala en la imagen. Lo del usuario se instala sin root en el home.
 - En el servidor no se instala nada aparte de Docker: Tailscale corre como contenedor.
 - El servidor no publica ningún puerto.
+- El contenedor del workspace corre con `cap_drop: ALL` y solo 6 capacidades (las que usan el entrypoint y sshd); el usuario `ai` no tiene ninguna. Si una función que corre como root falla con `Operation not permitted`, ver el comentario en `docker-compose.yml`.
 
 ```
  Tu PC (tailnet) ──Tailscale──► [ai-workspace-ts]  ◄─ red compartida ─►  [ai-workspace]
