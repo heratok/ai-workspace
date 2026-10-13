@@ -13,6 +13,11 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+    ignore:
+      # Debian 12 -> 13 rompe el build (repos bookworm-pgdg y Microsoft, paquetes t64): la migración se
+      # hace a propósito, con build completo, en odd/tasks/debian-13-migration.md. Los parches de 12 siguen llegando.
+      - dependency-name: debian
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker-compose
     directory: /
     schedule:
