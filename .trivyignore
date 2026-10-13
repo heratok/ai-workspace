@@ -1,0 +1,5 @@
+# Hallazgos de Trivy aceptados a propósito (medido con trivy v0.75.0). Cada uno lleva su motivo justo encima.
+
+# El workspace arranca como root porque sshd lo exige (separación de privilegios) y luego baja al usuario "ai",
+# que nunca obtiene root. El riesgo se acota con cap_drop: ALL (6 capacidades medidas) y no-new-privileges.
+DS-0002

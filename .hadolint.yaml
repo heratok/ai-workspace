@@ -1,0 +1,11 @@
+# Reglas de Hadolint ignoradas a propósito (medido con hadolint v2.15.1: 0 errores, 12 avisos).
+# Cada una lleva su motivo; el CI solo falla con errores (--failure-threshold error).
+ignored:
+  - SC3010   # falso positivo: el Dockerfile fija SHELL a bash, hadolint asume sh POSIX
+  - SC3054   # falso positivo: arrays de bash (SHELL bash)
+  - SC3014   # falso positivo: "==" dentro de [[ ]] (SHELL bash)
+  - DL3008   # los paquetes apt van en config/packages.apt (lista declarativa); fijar cada versión rompería builds al rotar Debian
+  - DL3003   # un solo RUN descarga, verifica el checksum y extrae Node; un WORKDIR ensuciaría las capas siguientes
+  - DL3046   # UID 1000 no es "alto": useradd -l no aplica y el UID debe coincidir con el volumen existente
+  - DL3025   # HEALTHCHECK usa bash -c con /dev/tcp a propósito (no hay curl/nc en la imagen mínima para ese puerto)
+  - DL3064   # falso positivo: ARG USER_UID/USER_GID son ids numéricos, no secretos
