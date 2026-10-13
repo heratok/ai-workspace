@@ -75,6 +75,12 @@ jobs:
           docker compose config > res.out
           grep -qE 'pids_limit: 4096' res.out || { echo "PIDS_LIMIT no se aplica"; exit 1; }
           grep -qE 'shm_size: .?(1g|1073741824)' res.out || { echo "SHM_SIZE no se aplica"; exit 1; }
+          # Versiones elegidas con ./setup.sh tools (se guardan en el .env): deben llegar al build y a la imagen de Tailscale
+          { echo CLAUDE_CODE_VERSION=2.1.290; echo HERDR_VERSION=0.9.3; echo TS_IMAGE_TAG=v1.100.0; } >> .env
+          docker compose config > pins.out
+          grep -qE 'CLAUDE_CODE_VERSION: 2\.1\.290' pins.out || { echo "CLAUDE_CODE_VERSION del .env no llega al build"; exit 1; }
+          grep -qE 'HERDR_VERSION: 0\.9\.3' pins.out || { echo "HERDR_VERSION del .env no llega al build"; exit 1; }
+          grep -qE 'image: tailscale/tailscale:v1\.100\.0' pins.out || { echo "TS_IMAGE_TAG del .env no llega a la imagen de Tailscale"; exit 1; }
 
   # Escaneo de seguridad del repo. Herramientas como contenedores FIJADOS por versión (Dependabot no ve
   # las versiones dentro de "run:": súbelas a mano). Excepciones documentadas en .hadolint.yaml y .trivyignore.

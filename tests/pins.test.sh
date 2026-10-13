@@ -152,6 +152,16 @@ t_env_example_pins_are_commented_out() {
   done
 }
 
+t_ci_checks_that_dotenv_pins_reach_the_build() {
+  # ./setup.sh tools escribe las versiones en el .env: esa es TODA su promesa. Si compose dejara de reenviarlas al build
+  # (o a la imagen de Tailscale), tools mostraría cambios que nunca se aplican. El CI lo comprueba con "docker compose config".
+  local ci="$ROOT/.github/workflows/ci.yml"
+  grep -q 'CLAUDE_CODE_VERSION=2.1.290' "$ci" && ok || nok "ci.yml debe escribir un override en el .env (CLAUDE_CODE_VERSION=2.1.290)"
+  grep -qE 'CLAUDE_CODE_VERSION: 2[\]?[.]1[\]?[.]290' "$ci" && ok || nok "ci.yml debe comprobar que el override llega al build (CLAUDE_CODE_VERSION: 2.1.290)"
+  grep -qE 'HERDR_VERSION: 0[\]?[.]9[\]?[.]3' "$ci" && ok || nok "ci.yml debe comprobar HERDR_VERSION del .env"
+  grep -qE 'tailscale/tailscale:v1[\]?[.]100[\]?[.]0' "$ci" && ok || nok "ci.yml debe comprobar que TS_IMAGE_TAG del .env llega a la imagen de Tailscale"
+}
+
 t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (repos bookworm-pgdg/Microsoft): migración planificada aparte
   local blk; blk="$(awk '/package-ecosystem: docker$/ {on=1; next} /package-ecosystem:/ {on=0} on' "$DEPENDABOT")"
   grep -q 'dependency-name: debian' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar debian"
@@ -161,7 +171,7 @@ t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (
 
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
          t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile \
-         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out; do
+         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out t_ci_checks_that_dotenv_pins_reach_the_build; do
   run "$t"
 done
 
