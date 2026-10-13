@@ -66,7 +66,7 @@ fi
 if command -v playwright >/dev/null; then
 echo "Playwright:"
 if ls -d "${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"/chromium* >/dev/null 2>&1; then
-  ok chromium "$(ls -d "${PLAYWRIGHT_BROWSERS_PATH}"/chromium* | xargs -n1 basename | tr '\n' ' ')"
+  ok chromium "$(for d in "${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"/chromium*; do printf "%s " "${d##*/}"; done)"
 else
   fail chromium "no encontrado en ${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"
 fi
