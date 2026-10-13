@@ -1,4 +1,4 @@
-# Mantiene al día las acciones fijadas por SHA en .github/workflows/.
+# Mantiene al día las acciones fijadas por SHA, la imagen base y las imágenes de compose.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -7,3 +7,15 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
