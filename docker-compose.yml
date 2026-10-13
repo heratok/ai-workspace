@@ -59,6 +59,10 @@ services:
         PLAYWRIGHT_MCP_VERSION: ${PLAYWRIGHT_MCP_VERSION:-0.0.83}
         UV_VERSION: ${UV_VERSION:-0.13.0}
         MISE_VERSION: ${MISE_VERSION:-v2026.10.8}
+        HERDR_VERSION: ${HERDR_VERSION:-0.9.4}
+        HERDR_SHA256_AMD64: ${HERDR_SHA256_AMD64:-493304fbefb0ed0ea0455f373b47f48d24e8774bc7974f4c916ad2e937675b23}
+        HERDR_SHA256_ARM64: ${HERDR_SHA256_ARM64:-9511cb70982c1ef115f232058e7ed7cf9640aa5a2c0ca78934cefda3aeb093fd}
+        GENTLE_AI_VERSION: ${GENTLE_AI_VERSION:-4.1.1}
         # Componentes: ./setup.sh components (o editar .env) y luego ./setup.sh update
         INSTALL_CLAUDE: ${INSTALL_CLAUDE:-true}
         INSTALL_PI: ${INSTALL_PI:-true}

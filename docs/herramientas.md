@@ -141,7 +141,7 @@ Si un instalador pide `sudo` o escribe en `/usr/local`, no va a funcionar como `
 herdr          # abre o retoma tus sesiones de agentes (Claude Code, opencode, Pi…)
 ```
 
-El instalador oficial verifica el SHA-256 y deja el binario en `/usr/local/bin`. Se actualiza con `./setup.sh update`. Para una versión más nueva solo para ti, sin root: `curl -fsSL https://herdr.dev/install.sh | sh` (instala en `~/.local/bin`, que tiene prioridad en el `PATH`).
+Se instala en `/usr/local/bin` desde el binario de la versión fijada (`HERDR_VERSION`), verificado con su SHA-256; no se ejecuta ningún instalador descargado en el momento (ver [versiones fijadas](configuracion.md#versiones-fijadas-de-la-imagen)). Se actualiza con `./setup.sh update`. Para una versión más nueva solo para ti, sin root: `curl -fsSL https://herdr.dev/install.sh | sh` (instala en `~/.local/bin`, que tiene prioridad en el `PATH`).
 
 ### Gentle AI y Antigravity CLI (agy)
 
@@ -153,6 +153,7 @@ agy                # Antigravity CLI. La primera vez muestra una URL: ábrela en
                    # aprueba con tu cuenta Google y pega el código (tienes ~30 s)
 ```
 
+- Gentle AI se instala desde el binario de la versión fijada (`GENTLE_AI_VERSION`), verificado con el `checksums.txt` de su release.
 - Gentle AI escribe su configuración en tu home (`~/.claude`, configuración de opencode, etc.), dentro del volumen `ai_home`.
 - **agy en un servidor sin navegador:** también puedes hacer login en tu PC y copiar `~/.gemini/antigravity-cli/antigravity-oauth-token` a la misma ruta dentro del workspace.
 
