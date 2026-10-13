@@ -615,7 +615,7 @@ Cada push a `main`, cada pull request y la ejecución manual pasan por `.github/
 
 - **lint:** sintaxis de todos los scripts, ShellCheck (solo errores), pruebas de multi-instancia (`tests/instances.test.sh`) y de `aiws` (`tests/aiws.test.sh`), y validación del compose con los nombres de la instancia principal y de una con alias.
 - **security:** Hadolint sobre el `Dockerfile` (falla solo con errores) y Trivy sobre el repo (secretos, dependencias y configuración; HIGH/CRITICAL con corrección), ambos como contenedores con versión fija (súbela a mano: Dependabot no ve los `run:`). Las excepciones aceptadas están en `.hadolint.yaml` y `.trivyignore`, cada una con su motivo. El workflow corre además **cada lunes** (`schedule`) para detectar CVE nuevas sin cambios de código.
-- **build:** construye la imagen completa y verifica que estén las herramientas (`claude`, `pi`, `playwright`, `herdr`, `doppler`, `gentle-ai`, `agy`, etc.). Después escanea la imagen con Trivy (por ahora solo informe, sin bloquear).
+- **build:** construye la imagen completa y verifica que estén las herramientas (`claude`, `pi`, `playwright`, `herdr`, `doppler`, `gentle-ai`, `agy`, etc.). Después escanea la imagen con Trivy: **bloquea** si hay CVE CRITICAL con corrección (baseline medido: 0) e informa los HIGH sin bloquear (~40, en binarios Go de terceros como `gh` y `gentle-ai`).
 
 `actions/checkout` está fijado por SHA (v7.0.1) y Dependabot revisa cada semana las acciones de `.github/workflows/` (`.github/dependabot.yml`). Si el CI sale en rojo, no hagas `upgrade` hasta que se corrija.
 
