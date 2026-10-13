@@ -35,7 +35,8 @@ BACKUP_KEEP="${AIWS_BACKUP_KEEP:-5}"
 keep_newest() {   # keep_newest <dir> <patrón> <n>: borra los más viejos
   local dir="$1" pat="$2" keep="$3" f
   [[ -d "$dir" ]] || return 0
-  ls -1t "$dir"/$pat 2>/dev/null | tail -n +"$((keep + 1))" | while IFS= read -r f; do
+  # { ls || true }: sin archivos que coincidan "ls" sale con error y, con pipefail + trap ERR, abortaba clean/backup
+  { ls -1t "$dir"/$pat 2>/dev/null || true; } | tail -n +"$((keep + 1))" | while IFS= read -r f; do
     rm -f -- "$f" && echo "    borrado: ${f#$SCRIPT_DIR/}"
   done
 }

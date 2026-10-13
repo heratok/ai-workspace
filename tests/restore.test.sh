@@ -241,6 +241,30 @@ t_restore_rejects_unknown_option() {
   assert_fail "opción desconocida" restore --nope
 }
 
+# ------------------------------------------------- rotación de logs/respaldos (keep_newest) en modo estricto
+# Hallado probando el upgrade real: "ls" sale con error si no hay archivos que coincidan y, con pipefail + trap ERR,
+# eso abortaba "clean" (p. ej. "upgrade --foreground" con la carpeta logs/ vacía). Ya fallaba en el monolito viejo.
+strict() { ( set -Eeo pipefail; trap 'echo "TRAP-ERR línea $LINENO"; exit 99' ERR; "$@"; echo termino ) 2>&1; }
+
+t_keep_newest_survives_a_directory_without_matching_files() {
+  load_setup
+  mkdir -p "$SB/vacio"
+  local out; out="$(strict keep_newest "$SB/vacio" '*-[0-9]*.log' 5)"
+  assert_has "no aborta" "$out" "termino"
+  [[ "$out" != *TRAP-ERR* ]] && ok || nok "el trap ERR saltó con una carpeta sin coincidencias: $out"
+  out="$(strict keep_newest "$SB/no-existe" '*.log' 5)"
+  assert_has "carpeta inexistente tampoco" "$out" "termino"
+}
+
+t_keep_newest_still_deletes_the_oldest_files() {
+  load_setup
+  mkdir -p "$SB/logs"; local i
+  for i in 1 2 3 4 5 6 7; do touch -d "2026-01-0$i" "$SB/logs/x-$i.log"; done
+  local out; out="$(strict keep_newest "$SB/logs" 'x-*.log' 5)"
+  assert_has "termina" "$out" "termino"
+  assert_eq "quedan las 5 más nuevas" "x-3.log x-4.log x-5.log x-6.log x-7.log" "$(cd "$SB/logs" && ls | sort | tr '\n' ' ' | sed 's/ $//')"
+}
+
 for t in t_latest_backup_picks_newest_by_timestamp t_latest_backup_ignores_other_instances_and_checksums \
          t_resolve_accepts_path_basename_and_default t_resolve_rejects_missing_and_foreign_backups \
          t_validate_accepts_good_archive t_validate_rejects_corrupt_archive t_validate_rejects_unknown_top_level_dirs \
@@ -249,7 +273,7 @@ for t in t_latest_backup_picks_newest_by_timestamp t_latest_backup_ignores_other
          t_restore_replaces_volumes_from_the_archive t_restore_takes_a_safety_backup_first \
          t_restore_aborts_when_not_confirmed t_restore_with_yes_does_not_prompt \
          t_restore_stops_and_restarts_a_running_workspace t_restore_leaves_a_stopped_workspace_stopped \
-         t_restore_refuses_invalid_archive_before_touching_anything t_restore_rejects_unknown_option; do
+         t_restore_refuses_invalid_archive_before_touching_anything t_restore_rejects_unknown_option t_keep_newest_survives_a_directory_without_matching_files t_keep_newest_still_deletes_the_oldest_files; do
   run "$t"
 done
 
