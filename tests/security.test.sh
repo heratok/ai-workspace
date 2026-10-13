@@ -56,6 +56,16 @@ t_image_is_scanned_after_build() {
   grep -qE 'image .*ai-workspace:ci' "$CI" && ok || nok "falta el escaneo de la imagen ai-workspace:ci"
 }
 
+t_image_scan_blocks_critical_and_reports_high() {
+  grep -qE 'image .*--severity CRITICAL .*--ignore-unfixed .*--exit-code 1 .*ai-workspace:ci|image .*--severity CRITICAL .*--exit-code 1 .*--ignore-unfixed .*ai-workspace:ci' "$CI" && ok || nok "el escaneo de imagen debe bloquear CRITICAL con corrección"
+  grep -qE 'image .*--severity HIGH .*--exit-code 0 .*ai-workspace:ci' "$CI" && ok || nok "los HIGH de la imagen deben informarse sin bloquear"
+}
+
+t_ci_step_names_are_valid_yaml() {      # "name: texto: otro" sin comillas rompe el YAML (actionlint: mapping values are not allowed)
+  local bad; bad="$(grep -nE '^      - name: [^"'"'"'].*: ' "$CI" || true)"
+  [[ -z "$bad" ]] && ok || nok "nombre de paso con ': ' sin comillas: $bad"
+}
+
 t_hadolint_config_documents_every_ignore() {
   [[ -f "$HADOLINT_CFG" ]] || { nok "falta .hadolint.yaml"; return 0; }
   local line n=0
@@ -81,7 +91,7 @@ t_trivyignore_documents_every_ignore() {
 
 for t in t_ci_runs_on_a_schedule t_has_a_security_job t_scanners_are_pinned_not_latest \
          t_repo_scan_blocks_only_actionable_findings t_image_is_scanned_after_build \
-         t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
+         t_image_scan_blocks_critical_and_reports_high t_ci_step_names_are_valid_yaml t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
   run "$t"
 done
 

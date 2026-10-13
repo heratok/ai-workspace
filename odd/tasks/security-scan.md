@@ -18,15 +18,14 @@ never noticed.
   (Dockerfile has no non-root USER: intentional, sshd needs root and drops to `ai`; capabilities are
   now limited by cap_drop ALL); 1 HIGH vuln in landing/package-lock.json (http-cache-semantics,
   NO fixed version -> filtered by --ignore-unfixed).
-- Full-image scan baseline NOT measured (building the image needs ~2 GB the test VPS cannot spare
-  safely) -> image scan is non-blocking at first.
+- Full-image scan baseline: measured later (see Progress).
 
 ## Design
 - New CI job `security` (parallel to `lint`): Hadolint (`--failure-threshold error`, config in
   `.hadolint.yaml` with a reason per ignored rule) and Trivy `fs` (`--ignore-unfixed`, HIGH+CRITICAL,
   `--exit-code 1`, accepted findings in `.trivyignore` each with a reason).
-- In the `build` job after the build: Trivy image scan, report-only (exit 0) for HIGH+CRITICAL fixed
-  vulns. Follow-up: make CRITICAL blocking once the first runs show the baseline.
+- In the `build` job after the build: Trivy image scan: CRITICAL with a fix BLOCKS (baseline measured: 0); HIGH reported only (exit 0; ~40, all in third-party Go binaries gh/gentle-ai).
+  (Baseline measured later on the full 5.12 GB image built on the Linux VPS.)
 - Workflow also triggers weekly (`schedule`, Monday 06:00 UTC) so drift and new CVEs surface.
 - Tools run as pinned containers (hadolint/hadolint:v2.15.1, aquasec/trivy:0.75.0): no third-party
   action to SHA-pin. Dependabot does not see versions inside `run:` lines (manual bump, noted in README).
@@ -46,4 +45,4 @@ Mode: strict. Runner: `bash tests/security.test.sh` (new, plain bash, no Docker)
 `bash tests/security.test.sh`; the same hadolint/trivy commands as CI on the VPS (exit codes 0).
 
 ## Progress / Next
-S1-S4 done. security test 22/22. Exact CI commands run on the Linux VPS: hadolint exit 0, trivy fs exit 0 (landing http-cache-semantics filtered by --ignore-unfixed, DS-0002 accepted), actionlint 1.7.7 exit 0. NOT verified: the image scan (full image not built; non-blocking by design) and the cron schedule (only runs on GitHub). Follow-up: promote CRITICAL to blocking after the first runs.
+S1-S4 done. security test 25/25 (incl. a YAML step-name guard: actionlint caught an unquoted ": " that would have broken the whole workflow). Full image built on the VPS (5.12 GB): CI tool checks pass incl. Chromium; trivy image CRITICAL exit 0. INCIDENT: that build+scan took the VPS disk from 73% to 98% before cleanup (guard covered only the build) - see memory reference/test-vps-rules. Exact CI commands run on the Linux VPS: hadolint exit 0, trivy fs exit 0 (landing http-cache-semantics filtered by --ignore-unfixed, DS-0002 accepted), actionlint 1.7.7 exit 0. NOT verified: the cron schedule (only runs on GitHub). Follow-up: promote CRITICAL to blocking after the first runs.

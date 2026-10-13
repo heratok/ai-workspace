@@ -92,10 +92,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Construir imagen
         run: docker build --progress=plain -t ai-workspace:ci .
-      - name: Escanear la imagen (CVE HIGH/CRITICAL con corrección; solo informe por ahora)
-        # Sin baseline medido de la imagen completa: no bloquea. Cuando las primeras ejecuciones
-        # muestren el estado real, pasar CRITICAL a --exit-code 1 (ver odd/tasks/security-scan.md).
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 ai-workspace:ci
+      - name: Escanear la imagen (CRITICAL con corrección disponible; bloquea)
+        # Baseline medido sobre la imagen completa: 0 CRITICAL con corrección.
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 ai-workspace:ci
+      - name: Informe de CVE HIGH de la imagen (no bloquea)
+        # El baseline son ~40 HIGH en binarios Go de terceros (gh, gentle-ai) que no se pueden corregir aquí.
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet --scanners vuln --severity HIGH --ignore-unfixed --exit-code 0 ai-workspace:ci
       - name: Verificar herramientas dentro de la imagen
         run: |
           docker run --rm --entrypoint zsh ai-workspace:ci -lc '
