@@ -11,7 +11,11 @@ sin que nadie tenga que hacerlo a mano.
 
 1. Crea `migrations/NNN-que-hace.sh` con el siguiente número libre (`002-...`, `003-...`).
 2. Debe ser **idempotente** (si se ejecuta dos veces no rompe nada) y **nunca borrar datos** del usuario
-   sin respaldo (volúmenes `ai_home`, `ai_workspace`, bases de datos).
+   sin respaldo (volúmenes `ai_home`, `ai_workspace`, bases de datos). Regla general: **ningún `docker volume rm`
+   ni `docker rm -f` automáticos**. De un volumen obsoleto solo se avisa y se da el comando para borrarlo a mano;
+   un contenedor viejo se elimina solo si está detenido (`docker rm` sin `-f`). Un volumen que hoy parece
+   obsoleto puede ser de otra instalación de ese mismo servidor. Las pruebas de ejemplo están en
+   `tests/migrations.test.sh` (usa un `docker` falso que distingue contenedores detenidos de los que corren).
 3. Tiene disponibles las funciones de `setup.sh`: `info`, `warn`, `die`, `env_get`, `env_set`, `env_del`,
    `compose`, `confirm`, y variables como `$SCRIPT_DIR`, `$ENV_FILE`, `$CONTAINER`.
    Con varias instancias en el servidor, cada carpeta corre sus migraciones: usa `$CONTAINER`, `$IMAGE`,

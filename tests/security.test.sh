@@ -75,6 +75,14 @@ t_every_test_script_is_shellchecked() {   # un script que ShellCheck no revisa p
   done
 }
 
+t_every_test_script_runs_in_ci() {   # un test que ningún paso del CI ejecuta no protege nada
+  local f n
+  for f in "$ROOT"/tests/*.test.sh; do
+    n="$(basename "$f")"
+    grep -qE "run: bash tests/$n" "$CI" && ok || nok "tests/$n no se ejecuta en el CI (falta un paso 'run: bash tests/$n' en ci.yml)"
+  done
+}
+
 t_hadolint_config_documents_every_ignore() {
   [[ -f "$HADOLINT_CFG" ]] || { nok "falta .hadolint.yaml"; return 0; }
   local line n=0
@@ -100,7 +108,7 @@ t_trivyignore_documents_every_ignore() {
 
 for t in t_ci_runs_on_a_schedule t_has_a_security_job t_scanners_are_pinned_not_latest \
          t_repo_scan_blocks_only_actionable_findings t_image_is_scanned_after_build \
-         t_image_scan_blocks_critical_and_reports_high t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
+         t_image_scan_blocks_critical_and_reports_high t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_every_test_script_runs_in_ci t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
   run "$t"
 done
 
