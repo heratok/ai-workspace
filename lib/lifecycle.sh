@@ -17,11 +17,32 @@ wait_healthy() {
   die "$name no quedó saludable (estado: $status)."
 }
 
-# Espera a que el nodo tenga IP en la tailnet. Si no hay auth key, muestra el link de login.
+# ¿Tailscale registró el nodo pero un admin de la tailnet aún no lo aprobó? (sin $(...|grep -q): pipefail + SIGPIPE)
+ts_needs_approval() {
+  local out; out="$(docker exec "$TS_CONTAINER" tailscale status 2>&1 || true)"
+  [[ "$out" == *"not yet approved"* ]]
+}
+
+# Espera a que el nodo tenga IP en la tailnet y esté aprobado. Si no hay auth key, muestra el link de login.
 ts_wait_login() {
-  local timeout=600 waited=0 url="" shown=""
+  local timeout=600 waited=0 url="" shown="" approval_shown=""
   while (( waited < timeout )); do
-    [[ -n "$(ts_ip)" ]] && { info "Tailscale conectado (IP $(ts_ip))"; return 0; }
+    if [[ -n "$(ts_ip)" ]]; then
+      if ! ts_needs_approval; then info "Tailscale conectado (IP $(ts_ip))"; return 0; fi
+      if [[ -z "$approval_shown" ]]; then
+        cat <<EOF
+
+${c_warn}>>> Tu tailnet exige aprobar los equipos nuevos.${c_off}
+    Un administrador debe aprobar "$(env_get TS_HOSTNAME)" en:
+
+      https://login.tailscale.com/admin/machines
+
+    (esperando la aprobación hasta $((timeout / 60)) minutos; sin ella el sidecar no queda saludable)
+EOF
+        approval_shown=1
+      fi
+      sleep 3; waited=$((waited + 3)); continue
+    fi
     url="$(docker logs "$TS_CONTAINER" 2>&1 | grep -oE 'https://login\.tailscale\.com/a/[A-Za-z0-9]+' | tail -n1 || true)"
     if [[ -n "$url" && "$url" != "$shown" ]]; then
       cat <<EOF

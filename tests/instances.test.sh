@@ -535,6 +535,64 @@ ai-workspace-foo|upgrade --yes" "$(cat "$SB/calls")"
   assert_has "carpeta inexistente" "$out" "zzz"
 }
 
+t_install_instance_dir_resolution() {
+  load_install
+  assert_fail "sin clon ni contenedores" aiws_instance_dir ""
+  mkdir -p "$SB/otra"; : > "$SB/otra/setup.sh"
+  fake_container "ai-workspace-ts"; echo "ai-workspace-ts=$SB/otra" > "$SB/fake/owners"
+  assert_eq "carpeta que Docker registró (otro usuario o ruta)" "$SB/otra" "$(aiws_instance_dir "")"
+  mkdir -p "$HOME/ai-workspace"; : > "$HOME/ai-workspace/setup.sh"
+  assert_eq "el clon de ~ tiene prioridad" "$HOME/ai-workspace" "$(aiws_instance_dir "")"
+  fake_container "ai-workspace-foo"; echo "ai-workspace-foo=$SB/otra" >> "$SB/fake/owners"
+  assert_eq "alias: busca por el contenedor de la instancia" "$SB/otra" "$(aiws_instance_dir foo)"
+}
+
+t_install_update_uses_registered_dir() {
+  load_install
+  mkdir -p "$SB/otra"
+  cat > "$SB/otra/setup.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "${PWD##*/}|$*" >> "$AIWS_TEST_CALLS"
+EOF
+  : > "$SB/calls"; export AIWS_TEST_CALLS="$SB/calls"
+  fake_container "ai-workspace-ts"; echo "ai-workspace-ts=$SB/otra" > "$SB/fake/owners"
+  aiws_update_instances default >/dev/null 2>&1; assert_eq "rc 0" "0" "$?"
+  assert_eq "actualizó el clon registrado, no ~/ai-workspace" "otra|upgrade --yes" "$(cat "$SB/calls")"
+}
+
+t_install_update_missing_dir_explains() {
+  load_install
+  fake_container "ai-workspace-ts"; echo "ai-workspace-ts=/root/ai-workspace" > "$SB/fake/owners"
+  local out; out="$(aiws_update_instances default 2>&1)"; local rc=$?
+  assert_eq "rc distinto de 0" "1" "$rc"
+  assert_has "dice dónde lo registró Docker" "$out" "/root/ai-workspace"
+  assert_has "sugiere ejecutar como su dueño" "$out" "como el usuario que lo instaló"
+  assert_has "resumen fallo" "$out" "fallo"
+}
+
+t_setup_ts_wait_login_needs_approval() {
+  load_setup
+  sleep() { :; }
+  ts_ip() { echo 100.64.0.9; }
+  echo 0 > "$SB/n"
+  # el nodo está registrado pero sin aprobar durante 2 consultas; a la tercera ya está aprobado
+  ts_needs_approval() { local n; n="$(<"$SB/n")"; n=$((n+1)); echo "$n" > "$SB/n"; (( n <= 2 )); }
+  local out; out="$(ts_wait_login 2>&1)"; local rc=$?
+  assert_eq "rc 0 al aprobarse" "0" "$rc"
+  assert_has "explica que hay que aprobar" "$out" "aprobar los equipos nuevos"
+  assert_has "da el enlace de la consola" "$out" "login.tailscale.com/admin/machines"
+  assert_has "conecta tras la aprobación" "$out" "Tailscale conectado"
+  assert_eq "esperó la aprobación (3 consultas)" "3" "$(<"$SB/n")"
+}
+
+t_setup_ts_needs_approval_detects_status() {
+  load_setup
+  docker() { [[ "$1" == exec ]] && echo "Machine is not yet approved by tailnet admin."; return 0; }
+  assert_ok "detecta nodo sin aprobar" ts_needs_approval
+  docker() { [[ "$1" == exec ]] && echo "100.64.0.9  ai-workspace  linux  -"; return 0; }
+  assert_fail "nodo aprobado" ts_needs_approval
+}
+
 t_install_main_menu_update() {
   load_install
   fake_clones; two_instances
@@ -1002,6 +1060,11 @@ run t_install_menu_choices
 run t_install_menu_reasks
 run t_install_update_instances
 run t_install_update_instances_failure_continues
+run t_install_instance_dir_resolution
+run t_install_update_uses_registered_dir
+run t_install_update_missing_dir_explains
+run t_setup_ts_wait_login_needs_approval
+run t_setup_ts_needs_approval_detects_status
 run t_install_main_menu_update
 run t_setup_summary_mentions_aiws
 run t_setup_aiws_link

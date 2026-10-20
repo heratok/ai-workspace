@@ -163,17 +163,38 @@ aiws_menu() {
   return 1
 }
 
+# Carpeta de compose que Docker registró al crear los contenedores de una instancia ("" = principal).
+# Vacía si no hay contenedores. Es la fuente fiable cuando el clon no está en ~ (otro usuario o ruta).
+aiws_registered_dir() {
+  local name="ai-workspace${1:+-$1}" c owner
+  for c in "$name-ts" "$name"; do
+    owner="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c" 2>/dev/null || true)"
+    if [[ -n "$owner" ]]; then echo "$owner"; return 0; fi
+  done
+  return 0
+}
+
+# Carpeta del clon de una instancia: la de ~ si tiene setup.sh; si no, la registrada en Docker.
+aiws_instance_dir() {
+  local dir; dir="$(aiws_dir_for "${1:-}")"
+  if [[ -f "$dir/setup.sh" ]]; then echo "$dir"; return 0; fi
+  dir="$(aiws_registered_dir "${1:-}")"
+  if [[ -n "$dir" && -f "$dir/setup.sh" ]]; then echo "$dir"; return 0; fi
+  return 1
+}
+
 # Actualiza instancias existentes (alias; default = la principal), una tras otra, con "setup.sh upgrade"
 # dentro de su carpeta (él mismo hace el fetch/merge, las migraciones y deja la versión previa para
 # rollback; un git pull antes lo dejaría sin cambios que aplicar). Sigue si alguna falla; devuelve 1 si hubo fallos.
 aiws_update_instances() {
-  local a key dir fails=0 r
+  local a key dir reg fails=0 r
   local -a results=()
   for a in "$@"; do
     key="$a"; [[ "$a" == default ]] && key=""
-    dir="$(aiws_dir_for "$key")"
-    if [[ ! -f "$dir/setup.sh" ]]; then
-      warn "No encuentro la carpeta de '$a' ($dir). Si está en otro lugar usa: aiws upgrade $a"
+    if ! dir="$(aiws_instance_dir "$key")"; then
+      reg="$(aiws_registered_dir "$key")"
+      warn "No encuentro la carpeta de '$a' (busqué en $(aiws_dir_for "$key")${reg:+ y en $reg, que es donde Docker la registró})."
+      warn "Si la instaló otro usuario (ej.: root), ejecuta esto como el usuario que lo instaló. Si está en otro lugar: aiws upgrade $a"
       results+=("  fallo  $a"); fails=$((fails + 1)); continue
     fi
     info "Actualizando $a ($dir)..."
