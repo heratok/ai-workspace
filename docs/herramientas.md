@@ -21,6 +21,8 @@ gh auth login        # una vez, dentro del workspace; el token queda en ~/.confi
 gh repo clone org/repo /workspace/repo
 ```
 
+`sshd` no acepta el reenvío del agente (`ssh -A`): cualquier proceso del workspace, como un agente o un paquete npm, podría firmar con las claves de tu PC. Para `git push` usa `gh auth login` (token en el volumen) o una clave propia del workspace (`ssh-keygen` dentro, registrada como deploy key).
+
 ## Bases de datos dentro del workspace, sin root
 
 La imagen **no trae servidores de bases de datos**. Cuando necesites uno, lo instalas dentro del workspace, sin root y sin reconstruir la imagen, con `devdb`:
@@ -98,7 +100,7 @@ La imagen trae una guía corta (`/etc/ai-workspace/AGENTS.md`, fuente: `config/A
 
 ### Login OAuth con callback en localhost
 
-Algunas herramientas (pi, MCPs con OAuth, etc.) abren una URL de login cuyo `redirect_uri` es `http://localhost:PUERTO/...`. Ese `localhost` es el de **tu PC**, no el del contenedor donde espera la herramienta, así que el navegador termina en `ERR_CONNECTION_REFUSED`. El `sshd` corre dentro del contenedor (comparte red con el sidecar de Tailscale, sin puertos publicados en el host) y permite `AllowTcpForwarding yes`, así que un túnel `ssh -L` desde tu PC llega al loopback del contenedor. El `PUERTO` aparece en el `redirect_uri` de la URL de login.
+Algunas herramientas (pi, MCPs con OAuth, etc.) abren una URL de login cuyo `redirect_uri` es `http://localhost:PUERTO/...`. Ese `localhost` es el de **tu PC**, no el del contenedor donde espera la herramienta, así que el navegador termina en `ERR_CONNECTION_REFUSED`. El `sshd` corre dentro del contenedor (comparte red con el sidecar de Tailscale, sin puertos publicados en el host) y permite reenvío local (`AllowTcpForwarding local`: `ssh -L` sí; `-R`, el reenvío del agente y los túneles no), así que un túnel `ssh -L` desde tu PC llega al loopback del contenedor. El `PUERTO` aparece en el `redirect_uri` de la URL de login.
 
 Tres métodos, en este orden:
 
