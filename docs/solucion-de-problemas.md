@@ -7,6 +7,7 @@
 | Síntoma | Causa y solución |
 |---|---|
 | Se cayó SSH durante `install` o `update` | La instalación continúa en segundo plano. Reconecta y ejecuta `./setup.sh progress` |
+| "Hay otra operación en curso en la instancia …" | Otro comando de `setup.sh` (o `aiws`) está modificando esa instancia, a menudo un `install`/`update`/`upgrade` en segundo plano. No se cambió nada: mira su avance con `./setup.sh progress` y repite el comando cuando termine. `status`, `progress`, `logs` y `doctor` siguen funcionando mientras tanto |
 | `aiws: command not found` | `setup.sh install` o `update` crea el enlace, y avisa si `~/.local/bin` no está en tu `PATH`. Agrégalo, o enlázalo a mano: `ln -s ~/ai-workspace/aiws ~/.local/bin/aiws` |
 | `aiws` dice "Instancia desconocida" | Revisa los alias con `aiws ls`. `default` (o `principal`) es la principal |
 | `aiws upgrade` sale con código 2 | Sin terminal, la confirmación es obligatoria: agrega `--yes` |

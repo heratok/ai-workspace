@@ -124,6 +124,12 @@ main() {
     if [[ -t 0 ]]; then menu; return; else cmd=install; fi   # sin terminal: instala
   fi
 
+  # Los comandos que modifican la instancia no corren a la vez (lib/background.sh: op_lock)
+  case "$cmd" in
+    install|update|upgrade|self-update|rollback|clean|components|migrate|add-key|backup|restore|tools|uninstall|purge|down) op_lock ;;
+    resources) if [[ $# -gt 0 ]]; then op_lock; fi ;;   # sin opciones solo muestra
+  esac
+
   case "$cmd" in
     install)
       local pubkey="" authkey="" foreground=false alias_set=false alias_arg=""
