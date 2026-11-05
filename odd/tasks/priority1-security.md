@@ -40,3 +40,9 @@ Branch: fix/priority1-security. Delivery: ask-on-risk. Runners: `bash tests/rest
 - L5 Checks: shellcheck v0.11.0 (CI list) clean; restore 47/0, entrypoint 12/0 (real image),
   instances 340/0, aiws 403/0, modules 144/0, hardening 11/0, security 55/0, migrations 21/0,
   docs 62/0. Not run: image rebuild with the new entrypoint baked in (tested by bind-mounting it).
+- L6 Independent verifier (diff 2061529..9141af7+6aa03eb): S1-S5 met, no blockers. Strict-mode
+  probes (set -Eeuo pipefail + trap ERR) confirm the rollback path and relative path; differential
+  vs baseline: normal `backup` identical. Advisories (pre-existing): safety-backup failure aborts with
+  the workspace stopped; backup names have 1 s resolution (same-second backup + restore collide);
+  `~/.ssh` as a regular file makes the container restart-loop. New, minor: `readlink -f` resolves a
+  symlinked archive argument to its target name.
