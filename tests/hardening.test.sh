@@ -58,8 +58,16 @@ t_tailscale_keeps_only_net_admin() {          # el sidecar necesita NET_ADMIN; e
   assert_eq "cap_add de tailscale" "NET_ADMIN" "$(list_of tailscale cap_add)"
 }
 
+t_sshd_allows_only_local_forwarding() {      # ssh -L (OAuth) sí; agente, -R, sockets y túneles no
+  local conf="$ROOT/config/sshd-ai-workspace.conf" k got
+  for k in "AllowAgentForwarding no" "AllowTcpForwarding local" "AllowStreamLocalForwarding no" "PermitTunnel no"; do
+    got="$(grep -iE "^[[:space:]]*${k%% *}[[:space:]]" "$conf" | tr -s ' \t' ' ' | sed 's/^ //')"
+    assert_eq "sshd: ${k%% *}" "$k" "$got"
+  done
+}
+
 for t in t_drops_all_capabilities t_adds_only_the_measured_capabilities t_workspace_has_no_dangerous_privileges \
-         t_keeps_no_new_privileges t_tailscale_keeps_only_net_admin; do
+         t_keeps_no_new_privileges t_tailscale_keeps_only_net_admin t_sshd_allows_only_local_forwarding; do
   run "$t"
 done
 
