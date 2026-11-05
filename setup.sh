@@ -12,8 +12,8 @@
 #   ./setup.sh upgrade [--yes]       Descarga lo último de GitHub (git), migra y reconstruye (--yes: sin preguntas)
 #   ./setup.sh resources [--mem 4g --cpus 2 ...]  Ver límites y uso real, o cambiarlos SIN reconstruir (--set: elegir uno a uno)
 #   ./setup.sh components            Elegir qué agentes/herramientas trae la imagen
-#   ./setup.sh rollback              Vuelve a la versión anterior al último upgrade
-#   ./setup.sh clean [--deep]        Limpia imágenes viejas, logs y respaldos antiguos
+#   ./setup.sh rollback [--yes]      Vuelve a la versión anterior al último upgrade (guarda tus cambios en git stash)
+#   ./setup.sh clean [--deep]        Limpia imágenes viejas y logs (los respaldos rotan solo con backup)
 #   ./setup.sh update                Reconstruye con versiones nuevas
 #   ./setup.sh add-key [RUTA.pub | 'ssh-ed25519 AAAA...' | github:usuario]
 #                                    Autoriza una clave SSH (sin argumento: la pide para pegar)
@@ -92,7 +92,7 @@ menu() {
   5) Estado y diagnóstico
   6) Agregar clave SSH
   7) Respaldar datos (home + proyectos)
-  8) Limpiar (imágenes viejas, logs y respaldos antiguos)
+  8) Limpiar (imágenes viejas y logs)
   9) Desinstalar (conserva datos)
  10) Desinstalar TODO (borra datos)
  11) Buscar actualizaciones de herramientas
