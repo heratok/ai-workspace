@@ -24,9 +24,9 @@ comp_value() {   # valor actual (o el defecto) de un componente
 # Menú de selección. Devuelve 0 si se guardaron cambios.
 choose_components() {
   local -a vars names defs descs vals
-  local i entry n="${#COMPONENTS[@]}"
+  local i n="${#COMPONENTS[@]}"
   for i in "${!COMPONENTS[@]}"; do
-    IFS='|' read -r vars[i] names[i] defs[i] descs[i] <<< "${COMPONENTS[i]}"
+    IFS='|' read -r "vars[i]" "names[i]" "defs[i]" "descs[i]" <<< "${COMPONENTS[i]}"
     vals[i]="$(comp_value "${vars[i]}" "${defs[i]}")"
   done
   local orig=("${vals[@]}") input tok

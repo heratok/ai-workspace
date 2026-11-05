@@ -12,22 +12,8 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
-
-# ------------------------------------------------------------------ aserciones
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-assert_lacks() { if [[ "$2" != *"$3"* ]]; then ok; else nok "$1: NO debía contener '$3' en: $2"; fi; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
 # ------------------------------------------------------------------- sandbox
 mk_sandbox() {
@@ -478,7 +464,6 @@ t_clean_environment() {
   assert_eq "setup.sh recibe el entorno limpio" "AIWS_INSTANCE=unset AIWS_NAME=unset AIWS_VOL_PREFIX=unset ENV_FILE=unset TS_HOSTNAME=unset AIWS_HOSTNAME=unset MEM_LIMIT=unset CPUS=unset COMPOSE_PROJECT_NAME=unset COMPOSE_PROFILES=unset" "$(cat "$SB/calls.env")"
 }
 
-
 # ================================================================== ronda 5: confirmación única y --yes
 t_upgrade_needs_yes_without_tty() {
   load_aiws; three
@@ -557,7 +542,6 @@ t_help_documents_yes() {
   assert_has "help update" "$(main help update 2>&1)" "--yes"
   assert_has "help general" "$(main help 2>&1)" "--yes"
 }
-
 
 # ================================================================== T12-T14: recursos
 res_three() {   # tres instancias con límites distintos y uso real simulado
@@ -648,7 +632,6 @@ t_help_resources() {
   assert_has "sin reconstruir" "$out" "sin reconstruir"
   assert_has "general lo lista" "$(main help 2>&1)" "resources"
 }
-
 
 # ================================================================== ayuda
 # Subcomandos reales de setup.sh que aiws debe poder delegar (si setup.sh suma uno, hay que sumarlo aquí y en aiws)

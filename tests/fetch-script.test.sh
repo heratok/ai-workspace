@@ -12,23 +12,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FETCH="$ROOT/config/fetch-script.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 export FETCH_RETRY_DELAY=0
 
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
-
 SCRIPT_BODY=$'#!/bin/bash\necho instalado\n'
+
+# file:// URL for a local path. On Windows (Git Bash) curl.exe does not understand MSYS paths such as
+# /tmp/...: cygpath -m turns them into C:/... (cygpath only exists there; Linux keeps the path as is).
+file_url() {
+  if command -v cygpath >/dev/null 2>&1; then echo "file:///$(cygpath -m "$1")"; else echo "file://$1"; fi
+}
 
 t_script_exists() {
   [[ -f "$FETCH" ]] && ok || nok "falta config/fetch-script.sh"
@@ -36,26 +30,26 @@ t_script_exists() {
 
 t_plain_script_passes_through() {
   printf '%s' "$SCRIPT_BODY" > "$TMP/plain.sh"
-  local out; out="$(bash "$FETCH" "file://$TMP/plain.sh" 2>/dev/null)"
+  local out; out="$(bash "$FETCH" "$(file_url "$TMP/plain.sh")" 2>/dev/null)"
   assert_eq "script plano" "$SCRIPT_BODY" "$out"$'\n'
 }
 
 t_gzip_script_is_decompressed() {
   printf '%s' "$SCRIPT_BODY" | gzip -c > "$TMP/gz.sh"
-  local out; out="$(bash "$FETCH" "file://$TMP/gz.sh" 2>/dev/null)"
+  local out; out="$(bash "$FETCH" "$(file_url "$TMP/gz.sh")" 2>/dev/null)"
   assert_eq "script gzip" "$SCRIPT_BODY" "$out"$'\n'
 }
 
 t_output_is_runnable() {
   printf '%s' "$SCRIPT_BODY" | gzip -c > "$TMP/gz2.sh"
-  local out; out="$(bash "$FETCH" "file://$TMP/gz2.sh" 2>/dev/null | bash)"
+  local out; out="$(bash "$FETCH" "$(file_url "$TMP/gz2.sh")" 2>/dev/null | bash)"
   assert_eq "ejecutable" "instalado" "$out"
 }
 
 t_non_script_fails_with_diagnostics() {
   printf '<html>error 200 de un proxy</html>' > "$TMP/html.out"
   local err rc
-  err="$(bash "$FETCH" "file://$TMP/html.out" 2>&1 >/dev/null)"; rc=$?
+  err="$(bash "$FETCH" "$(file_url "$TMP/html.out")" 2>&1 >/dev/null)"; rc=$?
   assert_eq "código de salida" "1" "$rc"
   assert_has "mensaje" "$err" "no es un script"
   assert_has "primeros bytes" "$err" "3c68746d6c"
@@ -63,7 +57,7 @@ t_non_script_fails_with_diagnostics() {
 
 t_missing_url_fails() {
   local rc
-  bash "$FETCH" "file://$TMP/no-existe" >/dev/null 2>&1; rc=$?
+  bash "$FETCH" "$(file_url "$TMP/no-existe")" >/dev/null 2>&1; rc=$?
   assert_eq "URL inexistente falla" "1" "$rc"
 }
 

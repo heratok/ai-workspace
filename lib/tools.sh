@@ -28,12 +28,12 @@ tools_image_versions() {
 
 # Tabla de herramientas. Las de versión nueva llevan número para poder elegirlas.
 tools_print_table() {   # tools_print_table <tsv>
-  local tsv="$1" id label pin latest origin status num n=0 errs=0 img state v
+  local tsv="$1" id pin latest origin status num n=0 errs=0 img state v
   local -A inimg=()
   while IFS='=' read -r id v; do [[ -n "$id" ]] && inimg[$id]="$v"; done < <(tools_image_versions)
   TOOLS_OUTDATED=(); TOOLS_PENDING=0
   printf '%-4s %-16s %-11s %-11s %-11s %-7s %s\n' "" HERRAMIENTA "EN IMAGEN" FIJADA ÚLTIMA ORIGEN ESTADO
-  while IFS=$'\t' read -r id label pin latest origin status; do
+  while IFS=$'\t' read -r id _ pin latest origin status; do
     [[ -n "$id" ]] || continue
     img="${inimg[$id]:--}"; num=""; state="al día"
     case "$status" in

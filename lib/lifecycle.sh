@@ -4,8 +4,8 @@
 
 # ---------------------------------------------------------------- ciclo de vida
 wait_healthy() {
-  local name="$1" i status="missing"
-  for i in $(seq 1 45); do
+  local name="$1" status="missing"
+  for _ in $(seq 1 45); do
     status="$(docker inspect -f '{{.State.Health.Status}}' "$name" 2>/dev/null || echo missing)"
     case "$status" in
       healthy)   info "$name saludable"; return 0 ;;

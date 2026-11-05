@@ -24,3 +24,13 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+  # Landing (Astro): un solo PR semanal con los parches/menores; las actualizaciones de seguridad llegan aparte
+  - package-ecosystem: npm
+    directory: /landing
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: fix(deps)
+    groups:
+      landing:
+        update-types: [minor, patch]

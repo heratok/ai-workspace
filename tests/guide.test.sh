@@ -11,14 +11,8 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
-
-# ------------------------------------------------------------------ aserciones
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-assert_file() { if [[ -f "$2" ]]; then ok; else nok "$1: no existe el archivo $2"; fi; return 0; }
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
 SKIPPED=0
 # Los symlinks pueden no estar disponibles (p. ej. Git Bash en Windows sin privilegios):
@@ -27,14 +21,6 @@ HAVE_SYMLINK=0; if ln -s "$0" "$TMP/.probe" 2>/dev/null && [[ -L "$TMP/.probe" ]
 run_sym() {
   if (( HAVE_SYMLINK )); then run "$1"
   else echo "== $1 (OMITIDA: sin soporte de symlinks en este entorno)"; SKIPPED=$((SKIPPED+1)); fi
-  return 0
-}
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
   return 0
 }
 
@@ -147,7 +133,6 @@ t_guide_commands_checked_by_ci() {
 t_ws_doctor_has_guide_option() {
   assert_has "ws-doctor --guide" "$(cat "$ROOT/config/ws-doctor")" "--guide"
 }
-
 
 t_guide_oauth_section() {
   local g; g="$(cat "$GUIDE_SRC" 2>/dev/null)"
