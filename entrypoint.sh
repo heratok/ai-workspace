@@ -88,6 +88,27 @@ if compgen -G "$HOME_DIR/.config/devdb/autostart.*" >/dev/null; then
 fi
 
 # 7. Validar configuración y arrancar
+# sshd no va con exec: tini solo avisa a este proceso, y PostgreSQL/Redis (devdb) morirían por SIGKILL.
+# Al recibir TERM/INT se detienen limpio las bases de datos y luego sshd (stop_grace_period: 30s).
 /usr/sbin/sshd -t
+/usr/sbin/sshd -D -e &
+SSHD_PID=$!
+
+shutdown() {
+  trap '' TERM INT
+  log "Deteniendo bases de datos locales y sshd..."
+  local db
+  for db in postgres redis; do   # una a una: si una falla, la otra se detiene igual
+    runuser -u "$USERNAME" -- env HOME="$HOME_DIR" USER="$USERNAME" /usr/local/bin/devdb stop "$db" \
+      || log "AVISO: devdb stop $db falló"
+  done
+  kill -TERM "$SSHD_PID" 2>/dev/null || true
+  wait "$SSHD_PID" || true
+  exit 0
+}
+trap shutdown TERM INT
+
 log "sshd listo"
-exec /usr/sbin/sshd -D -e
+rc=0
+wait "$SSHD_PID" || rc=$?
+exit "$rc"

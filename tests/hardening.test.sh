@@ -66,8 +66,22 @@ t_sshd_allows_only_local_forwarding() {      # ssh -L (OAuth) sí; agente, -R, s
   done
 }
 
+t_every_service_limits_its_logs() {           # json-file 10m x3 (ancla x-logging)
+  local anchor s
+  anchor="$(awk '/^x-logging: &logging/ {on=1; next} on && /^[^ ]/ {exit} on && NF {gsub(/["\047 ]/,""); print}' "$COMPOSE" | paste -sd, -)"
+  assert_eq "ancla x-logging" "driver:json-file,options:,max-size:10m,max-file:3" "$anchor"
+  for s in $(awk '/^services:/ {on=1; next} on && /^[^ #]/ {exit} on && /^  [A-Za-z0-9_-]+:/ {sub(/:.*/,""); sub(/^  /,""); print}' "$COMPOSE"); do
+    if service_block "$s" | grep -qE '^    logging:[[:space:]]*\*logging'; then ok; else nok "el servicio $s no limita sus logs"; fi
+  done
+}
+
+t_workspace_has_stop_grace_period() {         # tiempo para que el entrypoint detenga devdb antes que sshd
+  assert_eq "stop_grace_period del workspace" "30s" "$(service_block $WS | awk '/^    stop_grace_period:/ {print $2}')"
+}
+
 for t in t_drops_all_capabilities t_adds_only_the_measured_capabilities t_workspace_has_no_dangerous_privileges \
-         t_keeps_no_new_privileges t_tailscale_keeps_only_net_admin t_sshd_allows_only_local_forwarding; do
+         t_keeps_no_new_privileges t_tailscale_keeps_only_net_admin t_sshd_allows_only_local_forwarding \
+         t_every_service_limits_its_logs t_workspace_has_stop_grace_period; do
   run "$t"
 done
 

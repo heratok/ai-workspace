@@ -1,6 +1,13 @@
 # Variables: ver docs/configuracion.md -> "Variables del .env" y el archivo env.example
 name: ${AIWS_NAME:-ai-workspace}              # proyecto compose = nombre de la instancia (ver AIWS_INSTANCE en .env)
 
+# Logs de Docker con tope en todos los servicios: 3 archivos de 10 MB (sin esto crecen sin límite)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # ---------------------------------------------------------------------------
   # Tailscale (sidecar): única puerta de entrada. Nada se publica en el servidor.
@@ -10,6 +17,7 @@ services:
     container_name: ${AIWS_NAME:-ai-workspace}-ts
     hostname: ${TS_HOSTNAME:-${AIWS_NAME:-ai-workspace}}          # nombre del equipo en tu tailnet
     restart: unless-stopped
+    logging: *logging
     labels:
       org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}   # setup.sh/install.sh detectan así las instancias
     environment:
@@ -82,7 +90,9 @@ services:
     image: ${AIWS_NAME:-ai-workspace}:latest
     container_name: ${AIWS_NAME:-ai-workspace}
     restart: unless-stopped
+    logging: *logging
     init: true                                      # recoge procesos zombie
+    stop_grace_period: 30s                          # entrypoint detiene PostgreSQL/Redis (devdb) antes que sshd
     labels:
       org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}
     network_mode: service:tailscale                 # sin "ports:" ni "hostname:" (los da el sidecar)
@@ -137,6 +147,7 @@ services:
     profiles: [mssql]
     platform: linux/amd64                          # SQL Server solo publica imagen x86_64
     restart: unless-stopped
+    logging: *logging
     labels:
       org.ai-workspace.instance: ${AIWS_NAME:-ai-workspace}
     environment:
