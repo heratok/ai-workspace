@@ -47,12 +47,19 @@ case "${1:-}" in
   volume|image) exit 0 ;;
   inspect)      cat "$F/running"; exit 0 ;;
   run)          echo "run $*" >> "$F/calls.log"
-                args=("$@")
+                args=("$@"); host="" name=""
                 for ((i=0; i<${#args[@]}; i++)); do
                   if [[ "${args[i]}" == czf ]]; then
                     tar czf "$FAKE_BACKUP_DIR/$(basename "${args[i+1]}")" -C "$F/tree" .
                   fi
+                  [[ "${args[i]}" == -v && "${args[i+1]}" == *:/b:ro ]] && host="${args[i+1]%:/b:ro}"
+                  [[ "${args[i]}" == _ ]] && name="${args[i+1]}"
                 done
+                if [[ -n "$name" ]]; then          # extracción de restore: como Docker real
+                  # -v sin ruta absoluta es un volumen con nombre (vacío): el archivo no está ahí
+                  [[ "$host" == /* && -f "$host/$name" ]] || { echo "tar: /b/$name: No such file" >&2; exit 2; }
+                  if [[ -s "$F/fail_extract" ]]; then rm -f "$F/fail_extract"; echo "tar: error simulado" >&2; exit 2; fi
+                fi
                 exit 0 ;;
   compose)      [[ "$2" == version ]] && exit 0
                 echo "compose $*" >> "$F/calls.log"; exit 0 ;;
@@ -241,6 +248,42 @@ t_restore_rejects_unknown_option() {
   assert_fail "opción desconocida" restore --nope
 }
 
+t_restore_does_not_rotate_away_the_archive_it_restores() {   # el respaldo de seguridad no debe borrar el elegido
+  load_setup
+  # shellcheck disable=SC2034  # lo lee backup -> keep_newest
+  BACKUP_KEEP=1
+  local f="$BK/ai-workspace-20260101-100000.tar.gz"
+  mk_archive "$f"; touch -d '2020-01-01' "$f"                  # el más viejo: el primero que rotaría
+  ( restore --yes "$f" ) >/dev/null 2>&1
+  local rc=$?
+  assert_eq "termina bien" 0 "$rc"
+  [[ -f "$f" ]] && ok || nok "restore borró el respaldo que estaba restaurando"
+  assert_eq "una sola extracción" 1 "$(calls | grep -c 'xzf' || true)"
+}
+
+t_restore_accepts_a_relative_path() {   # "-v backups:/b" sería un volumen con nombre, no la carpeta
+  load_setup
+  mk_archive "$BK/ai-workspace-20260101-100000.tar.gz"
+  ( cd "$SB/repo" && restore --yes backups/ai-workspace-20260101-100000.tar.gz ) >/dev/null 2>&1
+  local rc=$?
+  assert_eq "termina bien" 0 "$rc"
+  local run; run="$(calls | grep -E '^run .*xzf' || true)"
+  [[ "$run" =~ -v\ /[^\ ]*/backups:/b:ro ]] && ok || nok "debía montar la carpeta con ruta absoluta: $run"
+}
+
+t_restore_puts_the_safety_backup_back_when_extraction_fails() {
+  load_setup
+  echo true > "$SB/fake/running"; echo 1 > "$SB/fake/fail_extract"
+  mk_archive "$BK/ai-workspace-20260101-100000.tar.gz"
+  ( restore --yes ai-workspace-20260101-100000.tar.gz ) >/dev/null 2>&1
+  local rc=$? safety; safety="$(basename "$(latest_backup)")"
+  (( rc != 0 )) && ok || nok "debía terminar con error"
+  assert_eq "dos extracciones (fallida + vuelta atrás)" 2 "$(calls | grep -c 'xzf' || true)"
+  [[ "$safety" != ai-workspace-20260101-100000.tar.gz ]] && ok || nok "no hubo respaldo de seguridad"
+  assert_has "la segunda usa el respaldo de seguridad" "$(calls | grep 'xzf' | tail -n1)" "$safety"
+  assert_has "vuelve a arrancar el workspace" "$(calls | tail -n1)" "start"
+}
+
 # ------------------------------------------------- rotación de logs/respaldos (keep_newest) en modo estricto
 # Hallado probando el upgrade real: "ls" sale con error si no hay archivos que coincidan y, con pipefail + trap ERR,
 # eso abortaba "clean" (p. ej. "upgrade --foreground" con la carpeta logs/ vacía). Ya fallaba en el monolito viejo.
@@ -273,7 +316,9 @@ for t in t_latest_backup_picks_newest_by_timestamp t_latest_backup_ignores_other
          t_restore_replaces_volumes_from_the_archive t_restore_takes_a_safety_backup_first \
          t_restore_aborts_when_not_confirmed t_restore_with_yes_does_not_prompt \
          t_restore_stops_and_restarts_a_running_workspace t_restore_leaves_a_stopped_workspace_stopped \
-         t_restore_refuses_invalid_archive_before_touching_anything t_restore_rejects_unknown_option t_keep_newest_survives_a_directory_without_matching_files t_keep_newest_still_deletes_the_oldest_files; do
+         t_restore_refuses_invalid_archive_before_touching_anything t_restore_rejects_unknown_option \
+         t_restore_does_not_rotate_away_the_archive_it_restores t_restore_accepts_a_relative_path \
+         t_restore_puts_the_safety_backup_back_when_extraction_fails t_keep_newest_survives_a_directory_without_matching_files t_keep_newest_still_deletes_the_oldest_files; do
   run "$t"
 done
 

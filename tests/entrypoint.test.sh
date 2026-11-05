@@ -16,8 +16,8 @@ IMAGE="${AIWS_TEST_IMAGE:-ai-workspace:latest}"
 P="aiws-ept-$$"
 TMP="$(mktemp -d)"
 cleanup() {
-  docker rm -f $(docker ps -aq --filter "name=^$P-") >/dev/null 2>&1 || true
-  docker volume rm $(docker volume ls -q --filter "name=^$P-") >/dev/null 2>&1 || true
+  docker ps -aq --filter "name=^$P-" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  docker volume ls -q --filter "name=^$P-" | xargs -r docker volume rm >/dev/null 2>&1 || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
