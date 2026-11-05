@@ -33,7 +33,8 @@ run() {
 # ------------------------------------------------------------------- sandbox
 # Repo copiado (SCRIPT_DIR propio), HOME falso y docker simulado que:
 #  - dice que todos los volúmenes/imágenes existen y si el contenedor corre ($F/running)
-#  - "docker run ... czf /b/X" crea X en backups/ a partir de $F/tree (respaldo simulado)
+#  - "docker run ... czf -" escribe por stdout un tar.gz de $F/tree (respaldo simulado);
+#    con $F/fail_backup escribe bytes a medias y sale con error
 #  - registra "docker run/compose/exec" en $F/calls.log
 mk_sandbox() {
   SB="$(mktemp -d "$TMP/sb.XXXXXX")"
@@ -49,8 +50,9 @@ case "${1:-}" in
   run)          echo "run $*" >> "$F/calls.log"
                 args=("$@"); host="" name=""
                 for ((i=0; i<${#args[@]}; i++)); do
-                  if [[ "${args[i]}" == czf ]]; then
-                    tar czf "$FAKE_BACKUP_DIR/$(basename "${args[i+1]}")" -C "$F/tree" .
+                  if [[ "${args[i]}" == czf && "${args[i+1]}" == - ]]; then
+                    if [[ -e "$F/fail_backup" ]]; then printf 'a medias'; echo "tar: error simulado" >&2; exit 2; fi
+                    tar czf - -C "$F/tree" .
                   fi
                   [[ "${args[i]}" == -v && "${args[i+1]}" == *:/b:ro ]] && host="${args[i+1]%:/b:ro}"
                   [[ "${args[i]}" == _ ]] && name="${args[i+1]}"
@@ -70,7 +72,7 @@ EOF
   chmod +x "$SB/bin/docker"
   cp -r "$ROOT/setup.sh" "$ROOT/lib" "$ROOT/env.example" "$SB/repo/"
   unset XDG_DATA_HOME
-  export HOME="$SB/home" FAKE_DOCKER_DIR="$SB/fake" FAKE_BACKUP_DIR="$SB/repo/backups" PATH="$SB/bin:$PATH"
+  export HOME="$SB/home" FAKE_DOCKER_DIR="$SB/fake" PATH="$SB/bin:$PATH"
 }
 
 load_setup() {
@@ -177,6 +179,74 @@ t_backup_writes_a_verifiable_checksum() {
   local f; f="$(latest_backup)"
   [[ -n "$f" && -f "$f.sha256" ]] && ok || nok "backup no escribió el .sha256"
   assert_ok "el checksum verifica" validate_backup "$f"
+}
+
+t_backup_streams_from_the_container_and_the_host_writes_the_file() {   # S6: el contenedor (root) no escribe en backups/
+  load_setup
+  ( backup ) >/dev/null 2>&1
+  local run f; run="$(calls | grep -E '^run .*czf' || true)"; f="$(latest_backup)"
+  assert_has "tar por stdout" "$run" "czf - "
+  assert_lacks "sin montar backups/ en el contenedor" "$run" ":/b"
+  [[ -n "$f" ]] && ok || nok "no quedó respaldo"
+  assert_eq "dueño del respaldo" "$(id -un)" "$(stat -c %U "$f" 2>/dev/null)"
+  assert_eq "permisos del respaldo" 600 "$(stat -c %a "$f" 2>/dev/null)"
+  assert_eq "permisos del checksum" 600 "$(stat -c %a "$f.sha256" 2>/dev/null)"
+}
+
+t_backup_is_atomic_on_success() {   # S5: se escribe <archivo>.partial y se renombra al final
+  load_setup
+  backup >/dev/null 2>&1
+  assert_eq "LAST_BACKUP es el respaldo final" "$(latest_backup)" "$LAST_BACKUP"
+  assert_eq "no queda .partial" "" "$(cd "$BK" && ls -- *.partial 2>/dev/null)"
+  assert_ok "el archivo es un tar.gz válido" validate_backup "$LAST_BACKUP"
+}
+
+t_backup_failure_leaves_no_valid_archive_and_restarts_devdb() {   # S5
+  load_setup
+  : > "$SB/fake/fail_backup"
+  ( backup ) >/dev/null 2>&1
+  local rc=$?
+  (( rc != 0 )) && ok || nok "backup debía fallar"
+  assert_eq "ningún archivo con nombre válido" "" "$(latest_backup)"
+  assert_eq "sin checksum" "" "$(cd "$BK" && ls -- *.sha256 2>/dev/null)"
+  assert_eq "sin .partial" "" "$(cd "$BK" && ls -- *.partial 2>/dev/null)"
+  assert_has "reanuda las BD locales" "$(calls | grep '^exec' | tail -n1)" "devdb autostart"
+}
+
+t_backup_still_rotates_to_backup_keep() {   # comportamiento previo: "backup" rota a BACKUP_KEEP
+  load_setup
+  # shellcheck disable=SC2034  # lo lee backup
+  BACKUP_KEEP=2
+  local d f
+  for d in 01 02 03; do f="$BK/ai-workspace-202601$d-100000.tar.gz"; mk_archive "$f"; touch -d "2026-01-$d" "$f"; done
+  ( backup ) >/dev/null 2>&1
+  assert_eq "quedan 2 respaldos" 2 "$(cd "$BK" && ls -- ai-workspace-*.tar.gz | wc -l)"
+  [[ -f "$BK/ai-workspace-20260103-100000.tar.gz" ]] && ok || nok "debía conservar el más nuevo de los viejos"
+}
+
+t_backup_rotation_never_touches_another_instance() {   # "ai-workspace-[0-9]*" también coincide con el alias "2"
+  load_setup
+  # shellcheck disable=SC2034  # lo lee backup
+  BACKUP_KEEP=1
+  local d f
+  for d in 01 02; do f="$BK/ai-workspace-2-202601$d-100000.tar.gz"; mk_archive "$f"; touch -d "2020-01-$d" "$f"; done
+  ( backup ) >/dev/null 2>&1
+  assert_eq "los respaldos del alias 2 siguen" 2 "$(cd "$BK" && ls -- ai-workspace-2-*.tar.gz | wc -l)"
+}
+
+t_backup_rotates_checksums_with_their_archives() {   # S4: sin checksums huérfanos
+  load_setup
+  # shellcheck disable=SC2034  # lo lee backup
+  BACKUP_KEEP=2
+  local d f
+  for d in 01 02 03; do f="$BK/ai-workspace-202601$d-100000.tar.gz"; mk_archive "$f"; touch -d "2026-01-$d" "$f"; done
+  ( cd "$BK" && sha256sum ai-workspace-20260101-100000.tar.gz > ai-workspace-20260101-100000.tar.gz.sha256 )
+  ( backup ) >/dev/null 2>&1
+  for f in "$BK"/*.sha256; do
+    [[ -e "$f" ]] || continue
+    [[ -f "${f%.sha256}" ]] && ok || nok "checksum huérfano: $(basename "$f")"
+  done
+  [[ ! -e "$BK/ai-workspace-20260101-100000.tar.gz.sha256" ]] && ok || nok "el .sha256 del respaldo rotado debía borrarse"
 }
 
 # ================================================================ restore
@@ -312,7 +382,9 @@ for t in t_latest_backup_picks_newest_by_timestamp t_latest_backup_ignores_other
          t_resolve_accepts_path_basename_and_default t_resolve_rejects_missing_and_foreign_backups \
          t_validate_accepts_good_archive t_validate_rejects_corrupt_archive t_validate_rejects_unknown_top_level_dirs \
          t_validate_rejects_archive_without_instance_volumes t_validate_accepts_paths_containing_a_colon t_validate_checks_sha256_when_present \
-         t_backup_writes_a_verifiable_checksum \
+         t_backup_writes_a_verifiable_checksum t_backup_streams_from_the_container_and_the_host_writes_the_file \
+         t_backup_is_atomic_on_success t_backup_failure_leaves_no_valid_archive_and_restarts_devdb \
+         t_backup_still_rotates_to_backup_keep t_backup_rotation_never_touches_another_instance t_backup_rotates_checksums_with_their_archives \
          t_restore_replaces_volumes_from_the_archive t_restore_takes_a_safety_backup_first \
          t_restore_aborts_when_not_confirmed t_restore_with_yes_does_not_prompt \
          t_restore_stops_and_restarts_a_running_workspace t_restore_leaves_a_stopped_workspace_stopped \

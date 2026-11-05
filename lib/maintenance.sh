@@ -49,8 +49,7 @@ clean() {
   docker image prune -f "${flt[@]}" | tail -n1 || true
   info "Logs: se conservan los últimos $LOG_KEEP"
   keep_newest "$LOG_DIR" '*-[0-9]*.log' "$LOG_KEEP"
-  info "Respaldos: se conservan los últimos $BACKUP_KEEP"
-  keep_newest "$SCRIPT_DIR/backups" "$AIWS_NAME-[0-9]*.tar.gz" "$BACKUP_KEEP"
+  # Los respaldos no se tocan aquí (clean corre solo tras cada update): rotan al hacer "backup"
   if [[ "$deep" == true ]]; then
     warn "Limpieza profunda: caché de build de Docker e imágenes sin uso (afecta a TODO Docker del servidor)."
     if confirm "¿Continuar?"; then
@@ -126,12 +125,7 @@ EOF
     echo "${c_ok}Cambios nuevos ($behind):${c_off}"
     g log --format='  %h %s (%cr)' "HEAD..origin/$REPO_BRANCH"
     g diff --stat "HEAD" "origin/$REPO_BRANCH" | tail -n 15
-    if [[ -n "$(g status --porcelain --untracked-files=no)" ]]; then
-      warn "Tienes cambios locales en archivos del repo:"; g status --short --untracked-files=no
-      if [[ "$yes" != true ]]; then confirm "¿Guardarlos aparte (git stash) y actualizar?" || { info "Cancelado."; return 0; }; fi
-      g stash push -q -m "setup.sh upgrade $(date +%F_%T)"
-      info "Tus cambios quedaron guardados: git stash list  (recupéralos con: git stash pop)"
-    fi
+    stash_local_changes "$yes" upgrade actualizar || { info "Cancelado."; return 0; }
     install -d -m 700 "$LOG_DIR"; g rev-parse HEAD > "$LOG_DIR/.prev-version"   # para rollback
     g merge -q --ff-only "origin/$REPO_BRANCH" || die "No se pudo actualizar sin conflictos (git status)."
     info "Archivos actualizados a: $(g log -1 --format='%h %s')"
@@ -159,12 +153,29 @@ EOF
   info "Cuando quieras aplicarlos: ./setup.sh update"
 }
 
-rollback() {
+# stash_local_changes <yes> <comando> <verbo>: guarda aparte (git stash) los cambios locales en archivos
+# del repo; sin yes=true pregunta antes. Devuelve 1 si el usuario no acepta (no se tocó nada).
+stash_local_changes() {
+  [[ -n "$(g status --porcelain --untracked-files=no)" ]] || return 0
+  warn "Tienes cambios locales en archivos del repo:"; g status --short --untracked-files=no
+  if [[ "$1" != true ]]; then confirm "¿Guardarlos aparte (git stash) y $3?" || return 1; fi
+  g stash push -q -m "setup.sh $2 $(date +%F_%T)"
+  info "Tus cambios quedaron guardados: git stash list  (recupéralos con: git stash pop)"
+}
+
+rollback() {   # rollback [--yes|-y]: sin preguntas (los cambios locales se guardan con git stash)
+  local yes=false
+  case "${1:-}" in
+    --yes|-y) yes=true ;;
+    "") ;;
+    *) die "Opción desconocida para rollback: $1 (usa --yes)" ;;
+  esac
   [[ -d "$SCRIPT_DIR/.git" && -s "$LOG_DIR/.prev-version" ]] || die "No hay una versión anterior registrada (solo existe tras un upgrade)."
   local prev; prev="$(cat "$LOG_DIR/.prev-version")"
   echo "Volver de $(g log -1 --format='%h %s') a $(g log -1 --format='%h %s' "$prev")"
-  confirm "¿Continuar? (luego se reconstruye la imagen)" || { info "Cancelado."; return 0; }
+  if [[ "$yes" != true ]]; then confirm "¿Continuar? (luego se reconstruye la imagen)" || { info "Cancelado."; return 0; }; fi
+  stash_local_changes "$yes" rollback "volver atrás" || { info "Cancelado."; return 0; }
   g reset -q --hard "$prev"
   info "Archivos de vuelta en $(g log -1 --format='%h %s'). Para volver a lo último: ./setup.sh upgrade"
-  exec bash "$SCRIPT_DIR/setup.sh" update
+  run_update
 }

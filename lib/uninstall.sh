@@ -39,11 +39,14 @@ EOF
   docker exec "$TS_CONTAINER" tailscale logout >/dev/null 2>&1 \
     && info "Sesión de Tailscale cerrada (si el equipo sigue en el panel, bórralo allí)." || true
   compose --profile mssql down --remove-orphans || true
-  local v
+  local v failed=()
   for v in "${ALL_VOLUMES[@]}"; do
-    docker volume rm "$v" >/dev/null 2>&1 && info "Volumen $v eliminado" || true
+    docker volume inspect "$v" >/dev/null 2>&1 || continue   # nunca existió (p. ej. mssql sin activar)
+    if docker volume rm "$v" >/dev/null 2>&1; then info "Volumen $v eliminado"; else failed+=("$v"); fi
   done
   docker image rm "$IMAGE" >/dev/null 2>&1 || true
+  # Si queda algún volumen, se conservan .env y el registro: la instancia sigue existiendo y se puede reintentar
+  (( ${#failed[@]} == 0 )) || die "No se pudieron eliminar estos volúmenes: ${failed[*]} (¿los usa otro contenedor? docker ps -a --filter volume=NOMBRE). Se conservan .env y el registro; corrige y repite: ./setup.sh uninstall --all"
   rm -f "$ENV_FILE"
   registry_remove
   info "Todo eliminado. Los archivos de esta carpeta quedan para reinstalar con ./setup.sh install"
