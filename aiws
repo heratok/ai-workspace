@@ -56,7 +56,7 @@ AIWS_CMDS=(
   "down|single|Detiene los contenedores (los datos se conservan)|aiws down santiago"
   "restore|destructive|Restaura un respaldo (el más reciente o uno dado; hace antes uno de seguridad)|aiws restore santiago --yes"
   "rollback|destructive|Vuelve a la versión anterior al último upgrade y reconstruye|aiws rollback santiago"
-  "clean|destructive|Borra imágenes viejas, logs y respaldos antiguos (--deep: caché de Docker)|aiws clean santiago --deep"
+  "clean|destructive|Borra imágenes viejas y logs (--deep: caché de Docker); no borra respaldos|aiws clean santiago --deep"
   "uninstall|destructive|Quita contenedores e imagen (con --all borra también datos y .env)|aiws uninstall santiago"
   "purge|destructive|Borra TODO de la instancia: datos, volúmenes, .env y el nodo de Tailscale|aiws purge santiago"
 )

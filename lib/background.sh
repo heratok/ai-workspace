@@ -7,6 +7,27 @@
 # en una sesión propia (setsid + nohup), inmune al corte de SSH.
 bg_running() { [[ -s "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; }
 
+# ------------------------------------------------------- bloqueo de operación
+# Un solo comando que modifica la instancia a la vez (flock sobre logs/.lock). El fd 9 lo heredan
+# el proceso en segundo plano y los "exec setup.sh update": el bloqueo dura hasta que terminen.
+# AIWS_LOCK_HELD=<carpeta> evita que esos hijos intenten bloquear contra su propio padre.
+LOCK_FILE="$LOG_DIR/.lock"
+op_lock() {
+  [[ "${AIWS_LOCK_HELD:-}" == "$SCRIPT_DIR" ]] && return 0
+  export AIWS_LOCK_HELD="$SCRIPT_DIR"
+  local fl="${AIWS_FLOCK:-flock}"   # AIWS_FLOCK: solo para pruebas
+  if ! command -v "$fl" >/dev/null 2>&1; then
+    warn "No encontré flock: sigo sin bloqueo (no lances dos comandos a la vez sobre $AIWS_NAME)."
+    return 0
+  fi
+  install -d -m 700 "$LOG_DIR"
+  exec 9>>"$LOCK_FILE"
+  if ! "$fl" -n 9; then
+    local hint=""; bg_running && hint=" Hay un proceso en segundo plano: míralo con ./setup.sh progress"
+    die "Hay otra operación en curso en la instancia $AIWS_NAME; no se cambió nada. Espera a que termine.$hint"
+  fi
+}
+
 run_bg() {   # run_bg <nombre> <paso-interno>
   local name="$1"; shift
   if bg_running; then
