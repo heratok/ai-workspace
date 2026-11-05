@@ -8,8 +8,10 @@ confirm() {   # confirm "pregunta" -> 0 si responde s/S
   [[ "$ans" =~ ^[sSyY]$ ]]
 }
 
-backup() {
-  local dest="$SCRIPT_DIR/backups" file v mounts=()
+backup() {   # backup [--no-rotate]: deja la ruta del respaldo en LAST_BACKUP (vacía si no hubo)
+  local dest="$SCRIPT_DIR/backups" file v mounts=() rotate=true
+  [[ "${1:-}" == --no-rotate ]] && rotate=false
+  LAST_BACKUP=""
   for v in "${VOLUMES[@]}"; do
     docker volume inspect "$v" >/dev/null 2>&1 && mounts+=(-v "$v:/v/$v:ro")
   done
@@ -29,8 +31,11 @@ backup() {
   fi
   docker exec -u "$WS_USER" "$CONTAINER" devdb autostart >/dev/null 2>&1 || true   # reanuda BD con autostart
   info "Respaldo listo: $dest/$file ($(du -h "$dest/$file" | cut -f1))"
-  keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz" "$BACKUP_KEEP"
-  keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz.sha256" "$BACKUP_KEEP"
+  LAST_BACKUP="$dest/$file"
+  if [[ "$rotate" == true ]]; then
+    keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz" "$BACKUP_KEEP"
+    keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz.sha256" "$BACKUP_KEEP"
+  fi
   echo "    Restaurar: ./setup.sh restore $file"
 }
 
@@ -53,7 +58,7 @@ resolve_backup() {  # resolve_backup [ARCHIVO]: ruta, nombre dentro de backups/ 
   local arg="${1:-}" f
   if [[ -z "$arg" ]]; then
     f="$(latest_backup)"; [[ -n "$f" ]] || die "No hay respaldos de $AIWS_NAME en $SCRIPT_DIR/backups."
-  elif [[ -f "$arg" ]]; then f="$arg"
+  elif [[ -f "$arg" ]]; then f="$(readlink -f -- "$arg")"   # absoluta: "-v backups:/b" sería un volumen con nombre
   elif [[ -f "$SCRIPT_DIR/backups/$arg" ]]; then f="$SCRIPT_DIR/backups/$arg"
   else die "No existe el respaldo: $arg"; fi
   is_own_backup_name "$(basename "$f")" || die "'$(basename "$f")' no es un respaldo de $AIWS_NAME (¿es de otra instancia?)."
@@ -81,7 +86,7 @@ validate_backup() {  # validate_backup ARCHIVO: integridad, checksum y que SOLO 
 }
 
 restore() {
-  local yes=false file="" a v ov was_running=false
+  local yes=false file="" a v was_running=false
   for a in "$@"; do
     case "$a" in
       --yes|-y) yes=true ;;
@@ -102,15 +107,30 @@ restore() {
     compose stop "$WS_SERVICE" >/dev/null
   fi
   info "Respaldo de seguridad del estado actual..."
-  backup
+  backup --no-rotate          # rotar aquí podría borrar justo el respaldo que se va a restaurar
+  local safety="$LAST_BACKUP"
 
-  local -a mounts=(); for v in "${vols[@]}"; do mounts+=(-v "$v:/v/$v"); done
   info "Restaurando ${#vols[@]} volumen(es)..."
-  docker run --rm "${mounts[@]}" -v "$(dirname "$file"):/b:ro" --entrypoint sh \
-    "$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)" \
-    -c 'f="$1"; shift; for v in "$@"; do find "/v/$v" -mindepth 1 -delete; done; tar xzf "/b/$f" -C /v' \
-    _ "$(basename "$file")" "${vols[@]}"
+  if ! extract_backup "$file" "${vols[@]}"; then
+    if [[ -n "$safety" ]]; then
+      warn "La restauración falló; se vuelve al estado anterior desde $(basename "$safety")..."
+      local -a svols=(); while IFS= read -r v; do svols+=("$v"); done < <(backup_volumes "$safety")
+      extract_backup "$safety" "${svols[@]}" \
+        || warn "Tampoco se pudo volver atrás. Respaldo de seguridad: $safety"
+    fi
+    if [[ "$was_running" == true ]]; then info "Arrancando el workspace..."; compose start "$WS_SERVICE" >/dev/null; fi
+    die "No se pudo restaurar desde $(basename "$file")."
+  fi
 
   if [[ "$was_running" == true ]]; then info "Arrancando el workspace..."; compose start "$WS_SERVICE" >/dev/null; fi
   info "Restauración lista desde $(basename "$file")."
+}
+
+extract_backup() {   # extract_backup ARCHIVO VOL...: vacía esos volúmenes y extrae ARCHIVO (ruta absoluta) en ellos
+  local file="$1" v; shift
+  local -a mounts=(); for v in "$@"; do mounts+=(-v "$v:/v/$v"); done
+  docker run --rm "${mounts[@]}" -v "$(dirname "$file"):/b:ro" --entrypoint sh \
+    "$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)" \
+    -c 'f="$1"; shift; for v in "$@"; do find "/v/$v" -mindepth 1 -delete; done; tar xzf "/b/$f" -C /v' \
+    _ "$(basename "$file")" "$@"
 }

@@ -21,7 +21,7 @@ Branch: fix/priority1-security. Delivery: ask-on-risk. Runners: `bash tests/rest
 |---|---|---|---|---|
 | T1 | S1 | inline | done | RED on test VPS (old entrypoint): /usr/local/bin, /etc/ssh/sshd_config.d and /etc/shadow became owned by `ai` after a restart. GREEN: tests/entrypoint.test.sh 12/0 |
 | T2 | S2 | inline | done | RED 4/4 in entrypoint.test; GREEN. Real check on VPS: login ok, `ssh -L` HTTP 200, `-R` refused, no SSH_AUTH_SOCK with `-A`, ws-doctor exit 0. hardening.test 11/0 |
-| T3 | S3-S5 | inline | pending | |
+| T3 | S3-S5 | inline | done | RED 7 asserts (fake docker now mimics real Docker: relative -v = named volume). GREEN restore.test 47/0. Real Docker on VPS (throwaway `ai-workspace-eptrt_*` volumes): relative path + AIWS_BACKUP_KEEP=1 restores v1 and keeps the archive; same scenario on `main` wiped both volumes and created a stray `backups` volume; failing extraction (hardlink to a missing member) rolled back to the safety backup, rc=1, data intact |
 
 ## Log
 - L1 (2026-11-05, user): "que le podemos mejorar a esto? revisando todo lo que tenemos?" -> review;
@@ -33,3 +33,10 @@ Branch: fix/priority1-security. Delivery: ask-on-risk. Runners: `bash tests/rest
   throwaway `aiws-ept-*` resources. The existing `ai-workspace-ts` sidecar is in a restart loop
   (4855 restarts) waiting for device approval in the Tailscale admin console (old install, before
   commit 2061529); left untouched.
+- L4 Found while testing (follow-up): backup archives are written by a root container into the
+  bind-mounted `backups/`, so they end up owned by root and `chmod 600` silently fails (mode 644).
+  The `backups/` dir is 700 so other host users cannot read them, but the owner cannot chmod/touch
+  them. Fix idea: `tar ... | cat > file` on the host side, or `--user $(id -u)`.
+- L5 Checks: shellcheck v0.11.0 (CI list) clean; restore 47/0, entrypoint 12/0 (real image),
+  instances 340/0, aiws 403/0, modules 144/0, hardening 11/0, security 55/0, migrations 21/0,
+  docs 62/0. Not run: image rebuild with the new entrypoint baked in (tested by bind-mounting it).
