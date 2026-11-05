@@ -83,6 +83,8 @@ aiws resources santiago --mem 4g --cpus 2         # cambia una instancia desde c
 
 Validaciones: memoria y `/dev/shm` como `512m`, `4g` o `1.5g` (sin distinguir mayúsculas); memoria mínima `1g` (con menos de `2g` avisa: Chromium/Playwright); CPUs un número positivo que no supere las del servidor; procesos un entero de al menos `256`. Si algún valor es inválido no se cambia nada.
 
+Fijos en `docker-compose.yml` (no van en `.env`): los logs de Docker de cada servicio tienen tope de 3 archivos de 10 MB (`json-file`), y al detener el workspace (`docker stop`, `docker compose stop` o `down`) tiene 30 s (`stop_grace_period`) para apagar limpio PostgreSQL y Redis de `devdb` antes que sshd.
+
 ### Componentes: instala solo lo que necesitas
 
 ```bash

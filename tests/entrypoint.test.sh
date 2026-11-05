@@ -103,7 +103,22 @@ allowstreamlocalforwarding: no
 permittunnel: no" "$(cat "$TMP/fwd")"
 }
 
-for t in t_fresh_home_gets_install_dirs_owned_by_ai t_planted_symlinks_are_not_followed_by_root t_sshd_forwarding_is_restricted; do
+t_stop_shuts_down_devdb_cleanly() {          # docker stop: PostgreSQL y Redis se apagan antes que sshd, sin SIGKILL
+  start_ws db; wait_ready db || { nok "el contenedor no arrancó"; return 0; }
+  # La imagen no trae servidores: devdb los descarga (requiere red)
+  as_ai db 'devdb install postgres 17 && devdb install redis && devdb start all' >/dev/null 2>&1 \
+    || { nok "devdb no pudo instalar o iniciar PostgreSQL y Redis"; return 0; }
+  docker stop -t 30 "$P-db" >/dev/null
+  local code; code="$(docker inspect -f '{{.State.ExitCode}}' "$P-db")"
+  if [[ "$code" == 137 ]]; then nok "el contenedor murió por SIGKILL (137)"; else ok; fi
+  # docker cp lee del contenedor detenido
+  local d=/home/ai/.local/share/devdb
+  assert_has "PostgreSQL se apagó limpio" "$(docker cp "$P-db:$d/postgres.log" - 2>/dev/null | tar -xO)" "database system is shut down"
+  assert_has "Redis se apagó limpio" "$(docker cp "$P-db:$d/redis.log" - 2>/dev/null | tar -xO)" "ready to exit"
+}
+
+for t in t_fresh_home_gets_install_dirs_owned_by_ai t_planted_symlinks_are_not_followed_by_root t_sshd_forwarding_is_restricted \
+         t_stop_shuts_down_devdb_cleanly; do
   run "$t"
 done
 
