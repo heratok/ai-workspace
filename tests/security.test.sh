@@ -68,7 +68,7 @@ t_ci_step_names_are_valid_yaml() {      # "name: texto: otro" sin comillas rompe
 
 t_every_test_script_is_shellchecked() {   # un script que ShellCheck no revisa puede esconder errores de shell
   local f n d line; line="$(grep -E 'koalaman/shellcheck' "$CI")"
-  for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/helpers/*.sh "$ROOT"/scripts/*.sh; do
+  for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/helpers/*.sh "$ROOT"/scripts/*.sh "$ROOT"/lib/*.sh; do
     [[ -f "$f" ]] || continue
     d="$(basename "$(dirname "$f")")"; n="$d/$(basename "$f")"
     [[ "$line" == *"$n"* || "$line" == *"$d/*.test.sh"* || "$line" == *"$d/*.sh"* ]] && ok || nok "$n no está en la lista de ShellCheck de ci.yml"
@@ -106,7 +106,57 @@ t_trivyignore_documents_every_ignore() {
   (( n > 0 )) && ok || nok ".trivyignore no acepta nada (DS-0002 está medido y es intencional)"
 }
 
+t_ci_cancels_superseded_runs() {   # two pushes to the same ref should not both burn a 60 min build
+  grep -qE '^concurrency:' "$CI" && ok || nok "ci.yml no tiene un bloque 'concurrency:' de nivel superior"
+  grep -qE '^  group: ci-\$\{\{ github\.ref \}\}' "$CI" && ok || nok "concurrency debe agrupar por 'ci-\${{ github.ref }}'"
+  grep -qE '^  cancel-in-progress: true' "$CI" && ok || nok "concurrency debe tener 'cancel-in-progress: true'"
+}
+
+t_every_step_has_a_timeout() {   # a hung suite must not burn the whole job
+  local steps timeouts
+  steps="$(grep -cE '^      - (name|uses):' "$CI")"
+  timeouts="$(grep -cE '^        timeout-minutes: [0-9]+' "$CI")"
+  [[ "$steps" -gt 0 && "$steps" == "$timeouts" ]] && ok || nok "pasos: $steps, pasos con timeout-minutes: $timeouts (cada paso necesita el suyo)"
+}
+
+t_build_uses_layer_cache() {
+  grep -qE 'uses: docker/setup-buildx-action@[0-9a-f]{40}' "$CI" && ok || nok "falta docker/setup-buildx-action fijado por SHA"
+  grep -qE 'uses: docker/build-push-action@[0-9a-f]{40}' "$CI" && ok || nok "falta docker/build-push-action fijado por SHA"
+  grep -qE 'cache-from: type=gha' "$CI" && ok || nok "el build debe leer la caché de GitHub (cache-from: type=gha)"
+  grep -qE 'cache-to: type=gha' "$CI" && ok || nok "el build debe guardar la caché de GitHub (cache-to: type=gha)"
+  grep -qE "no-cache: \\$\\{\\{ github\\.event_name == 'schedule' \\}\\}" "$CI" && ok || nok "sin caché solo en la corrida del lunes (no-cache: \${{ github.event_name == 'schedule' }})"
+  grep -qE 'load: true' "$CI" && ok || nok "la imagen debe quedar cargada en Docker para los pasos siguientes (load: true)"
+  grep -qE 'tags: ai-workspace:ci' "$CI" && ok || nok "la imagen debe llamarse ai-workspace:ci"
+}
+
+t_tool_images_pinned_by_digest() {   # a tag can be moved; a digest cannot
+  local img
+  for img in koalaman/shellcheck hadolint/hadolint aquasec/trivy; do
+    if grep -E "$img:" "$CI" | grep -vqE "$img:[^ ]+@sha256:[0-9a-f]{64}"; then
+      nok "$img debe ir fijado por digest (tag@sha256:...) en todos sus usos"
+    else ok; fi
+  done
+}
+
+t_landing_is_built_and_audited() {
+  grep -qE '^  landing:' "$CI" && ok || nok "falta el job 'landing'"
+  grep -qE 'working-directory: landing' "$CI" && ok || nok "el job landing debe trabajar en landing/"
+  grep -qE 'run: npm ci' "$CI" && ok || nok "landing debe instalar con 'npm ci'"
+  grep -qE 'run: npm run build' "$CI" && ok || nok "landing debe compilar con 'npm run build'"
+  grep -qE 'run: npm audit --audit-level=high' "$CI" && ok || nok "landing debe pasar 'npm audit --audit-level=high'"
+}
+
+t_dependabot_watches_landing_npm() {
+  local dep="$ROOT/.github/dependabot.yml" block
+  block="$(awk '/package-ecosystem: npm/{f=1} f&&/package-ecosystem:/&&!/npm/{f=0} f' "$dep")"
+  [[ -n "$block" ]] && ok || { nok "dependabot.yml no tiene una entrada npm"; return 0; }
+  assert_has "directorio npm" "$block" "directory: /landing"
+  assert_has "grupos npm" "$block" "groups:"
+}
+
 for t in t_ci_runs_on_a_schedule t_has_a_security_job t_scanners_are_pinned_not_latest \
+         t_ci_cancels_superseded_runs t_every_step_has_a_timeout t_build_uses_layer_cache \
+         t_tool_images_pinned_by_digest t_landing_is_built_and_audited t_dependabot_watches_landing_npm \
          t_repo_scan_blocks_only_actionable_findings t_image_is_scanned_after_build \
          t_image_scan_blocks_critical_and_reports_high t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_every_test_script_runs_in_ci t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
   run "$t"

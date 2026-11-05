@@ -14,49 +14,75 @@ on:
 permissions:
   contents: read
 
+# Dos push seguidos a la misma rama: el segundo cancela al primero (el build completo dura hasta 60 min)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
       - name: Sintaxis bash
+        timeout-minutes: 5
         run: |
           for f in install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh lib/*.sh scripts/*.sh tests/*.sh; do
             bash -n "$f" && echo "ok $f"
           done
           sh -n config/env.sh
       - name: ShellCheck (nivel warning, siguiendo los módulos de lib/)
-        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh scripts/*.sh tests/*.test.sh tests/helpers/*.sh
+        timeout-minutes: 10
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh scripts/*.sh tests/*.test.sh tests/helpers/*.sh
+          # Los módulos de lib/ comparten variables con setup.sh (colores, datos de la instancia): SC2034/SC2154 no aplican
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d -x --source-path=SCRIPTDIR -S warning -e SC2034,SC2154 lib/*.sh
       - name: Pruebas de multi-instancia
+        timeout-minutes: 5
         run: bash tests/instances.test.sh
       - name: Pruebas del comando aiws
+        timeout-minutes: 5
         run: bash tests/aiws.test.sh
       - name: Pruebas de la guía para agentes
+        timeout-minutes: 5
         run: bash tests/guide.test.sh
       - name: Pruebas de restauración de respaldos
+        timeout-minutes: 5
         run: bash tests/restore.test.sh
       - name: Pruebas de la documentación (enlaces y estructura)
+        timeout-minutes: 5
         run: bash tests/docs.test.sh
       - name: Pruebas de endurecimiento del compose
+        timeout-minutes: 5
         run: bash tests/hardening.test.sh
       - name: Pruebas de la estructura de setup.sh (módulos en lib/)
+        timeout-minutes: 5
         run: bash tests/modules.test.sh
       - name: Pruebas de las migraciones (no borran datos ni contenedores en uso)
+        timeout-minutes: 5
         run: bash tests/migrations.test.sh
       - name: Pruebas de tools (buscar y aplicar versiones nuevas)
+        timeout-minutes: 5
         run: bash tests/tools.test.sh
       - name: Pruebas de update-pins (listar y fijar versiones)
+        timeout-minutes: 5
         run: bash tests/update-pins.test.sh
       - name: Pruebas de versiones fijadas
+        timeout-minutes: 5
         run: bash tests/pins.test.sh
       - name: Pruebas de la descarga de instaladores
+        timeout-minutes: 5
         run: bash tests/fetch-script.test.sh
       - name: Pruebas del bloqueo por instancia (un comando que modifica a la vez)
+        timeout-minutes: 5
         run: bash tests/lock.test.sh
       - name: Pruebas de clean, rollback y uninstall --all
+        timeout-minutes: 5
         run: bash tests/maintenance.test.sh
       - name: docker compose config
+        timeout-minutes: 5
         run: |
           cp env.example .env
           sed -i 's/external: true/external: false/' docker-compose.yml
@@ -90,18 +116,23 @@ jobs:
           grep -qE 'HERDR_VERSION: 0\.9\.3' pins.out || { echo "HERDR_VERSION del .env no llega al build"; exit 1; }
           grep -qE 'image: tailscale/tailscale:v1\.100\.0' pins.out || { echo "TS_IMAGE_TAG del .env no llega a la imagen de Tailscale"; exit 1; }
 
-  # Escaneo de seguridad del repo. Herramientas como contenedores FIJADOS por versión (Dependabot no ve
-  # las versiones dentro de "run:": súbelas a mano). Excepciones documentadas en .hadolint.yaml y .trivyignore.
+  # Escaneo de seguridad del repo. Herramientas como contenedores FIJADOS por versión y digest (un tag se puede
+  # mover; Dependabot no ve las imágenes dentro de "run:": súbelas a mano, tag y digest juntos).
+  # Excepciones documentadas en .hadolint.yaml y .trivyignore.
   security:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
       - name: Hadolint (Dockerfile; falla solo con errores)
-        run: docker run --rm -i -v "$PWD/.hadolint.yaml:/cfg.yaml:ro" hadolint/hadolint:v2.15.1 hadolint --config /cfg.yaml --failure-threshold error - < Dockerfile
+        timeout-minutes: 5
+        run: docker run --rm -i -v "$PWD/.hadolint.yaml:/cfg.yaml:ro" hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint --config /cfg.yaml --failure-threshold error - < Dockerfile
       - name: Trivy (secretos, dependencias y configuración; HIGH/CRITICAL con corrección)
-        run: docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.75.0 fs --quiet --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /src/.trivyignore --exit-code 1 /src
+        timeout-minutes: 10
+        run: docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa fs --quiet --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /src/.trivyignore --exit-code 1 /src
       - name: Pruebas de la configuración de seguridad
+        timeout-minutes: 5
         run: bash tests/security.test.sh
 
   build:
@@ -110,20 +141,35 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Construir imagen
-        run: docker build --progress=plain -t ai-workspace:ci .
+        timeout-minutes: 5
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        timeout-minutes: 5
+      - name: Construir imagen (con caché de capas; sin caché en la corrida del lunes)
+        timeout-minutes: 45
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: ai-workspace:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          no-cache: ${{ github.event_name == 'schedule' }}
       - name: Escanear la imagen (CRITICAL con corrección disponible; bloquea)
+        timeout-minutes: 15
         # Baseline medido sobre la imagen completa: 0 CRITICAL con corrección.
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 ai-workspace:ci
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --quiet --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 ai-workspace:ci
       - name: Informe de CVE HIGH de la imagen (no bloquea)
+        timeout-minutes: 15
         # El baseline son ~40 HIGH en binarios Go de terceros (gh, gentle-ai) que no se pueden corregir aquí.
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet --scanners vuln --severity HIGH --ignore-unfixed --exit-code 0 ai-workspace:ci
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --quiet --scanners vuln --severity HIGH --ignore-unfixed --exit-code 0 ai-workspace:ci
       - name: Entrypoint y sshd en un contenedor real (enlaces simbólicos del usuario y reenvíos)
+        timeout-minutes: 15
         env:
           AIWS_TEST_IMAGE: ai-workspace:ci
           AIWS_TEST_REQUIRE: "1"
         run: bash tests/entrypoint.test.sh
       - name: Verificar herramientas dentro de la imagen
+        timeout-minutes: 5
         run: |
           docker run --rm --entrypoint zsh ai-workspace:ci -lc '
             set -e
@@ -132,6 +178,7 @@ jobs:
               echo "ok $c"
             done'
       - name: Verificar la guía para agentes dentro de la imagen
+        timeout-minutes: 5
         run: |
           docker run --rm --entrypoint bash ai-workspace:ci -c '
             set -e
@@ -144,3 +191,30 @@ jobs:
               echo "ok guía: $c"
             done
             ws-doctor --guide | grep -q "Guía del entorno"'
+
+  # La landing (Astro) se despliega en Vercel: aquí se comprueba que compile y que sus dependencias
+  # no tengan CVE HIGH/CRITICAL conocidas antes de llegar a main.
+  landing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        timeout-minutes: 5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+      - name: Instalar dependencias (exactas del lockfile)
+        timeout-minutes: 10
+        run: npm ci
+      - name: Compilar la landing
+        timeout-minutes: 10
+        run: npm run build
+      - name: Auditar dependencias (bloquea HIGH/CRITICAL)
+        timeout-minutes: 5
+        run: npm audit --audit-level=high

@@ -35,7 +35,7 @@ run_bg() {   # run_bg <nombre> <paso-interno>
     follow; return 0
   fi
   install -d -m 700 "$LOG_DIR"
-  local log="$LOG_DIR/$name-$(date +%Y%m%d-%H%M%S).log"
+  local log; log="$LOG_DIR/$name-$(date +%Y%m%d-%H%M%S).log"
   : > "$log"; chmod 600 "$log"
   ln -sfn "$(basename "$log")" "$LOG_DIR/latest.log"
   rm -f "$PID_FILE" "$STATUS_FILE"
