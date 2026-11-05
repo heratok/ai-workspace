@@ -14,25 +14,11 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
-# ------------------------------------------------------------------ aserciones
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-assert_lacks() { if [[ "$2" != *"$3"* ]]; then ok; else nok "$1: NO debía contener '$3' en: $2"; fi; return 0; }
-assert_ok()   { local n="$1"; shift; if ( "$@" ) >/dev/null 2>&1; then ok; else nok "$n: debía tener éxito: $*"; fi; return 0; }
-assert_fail() { local n="$1"; shift; if ( "$@" ) >/dev/null 2>&1; then nok "$n: debía fallar: $*"; else ok; fi; return 0; }
+# ------------------------------------------------------------------ utilidades
 join() { local IFS=,; echo "$*"; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
 
 # ------------------------------------------------------------------- sandbox
 # HOME falso, repo copiado (SCRIPT_DIR propio) y docker simulado.
@@ -325,7 +311,6 @@ EOF
   grep -q 'build' "$SB/fake/compose.log" 2>/dev/null && ok || nok "setup.sh debía llegar al build (compose.log vacío): $out"
 }
 
-
 t_devdb_tunnel_hostname() {
   if [[ "$(id -u)" -eq 0 ]]; then echo "  (omitida: devdb se niega a correr como root)"; return 0; fi
   mk_sandbox
@@ -335,7 +320,6 @@ t_devdb_tunnel_hostname() {
   assert_eq "sin AIWS_HOSTNAME" "ssh -N -L 5432:127.0.0.1:5432 ai@ai-workspace" \
     "$(env -u AIWS_HOSTNAME HOME="$SB/home" bash "$dd" tunnel 2>&1 | grep -o 'ssh -N -L [^ ]* ai@[^ ]*')"
 }
-
 
 # =============================================================== install.sh
 t_install_alias_validation() {
@@ -634,7 +618,6 @@ t_setup_aiws_link() {
   assert_has "avisa del PATH" "$out" "PATH"
 }
 
-
 # ================================================================ ronda 3: códigos de salida, registro y enlace
 t_setup_report_status_propagates() {
   load_setup
@@ -713,7 +696,6 @@ t_setup_aiws_link_edge_cases() {
   assert_eq "archivo normal intacto" "mio" "$(cat "$SB/sys/aiws")"
   assert_eq "usa la otra carpeta" "$SCRIPT_DIR/aiws" "$(readlink "$HOME/.local/bin/aiws")"
 }
-
 
 # ================================================================ ronda 5: setup.sh upgrade sin preguntas
 # git simulado: cuántos commits faltan ($SB/behind) y si hay cambios locales ($SB/dirty)
@@ -806,7 +788,6 @@ t_setup_upgrade_unknown_option() {
   fake_git_for_upgrade
   assert_fail "opción desconocida" upgrade --nada
 }
-
 
 # ================================================================ T12-T14: recursos por instancia
 t_setup_suggest_mem() {
@@ -1020,7 +1001,6 @@ t_setup_sizing_existing_env_untouched() {
   configure_env "tskey-auth-t" </dev/null >/dev/null 2>&1
   assert_eq "un --mem explícito sí se aplica" "3g" "$(env_get MEM_LIMIT)"
 }
-
 
 run t_setup_default_names
 run t_setup_default_alias_word

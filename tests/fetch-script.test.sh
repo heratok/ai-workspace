@@ -12,21 +12,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FETCH="$ROOT/config/fetch-script.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 export FETCH_RETRY_DELAY=0
-
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
 
 SCRIPT_BODY=$'#!/bin/bash\necho instalado\n'
 

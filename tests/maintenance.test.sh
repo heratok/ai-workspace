@@ -12,21 +12,8 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
-
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-assert_lacks() { if [[ "$2" != *"$3"* ]]; then ok; else nok "$1: NO debía contener '$3' en: $2"; fi; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
 # ------------------------------------------------------------------- sandbox
 # Repo copiado (SCRIPT_DIR propio), HOME falso y docker simulado:
@@ -172,7 +159,45 @@ t_uninstall_all_ignores_volumes_that_never_existed() {   # p. ej. mssql sin acti
   assert_has "avisa" "$out" "Todo eliminado"
 }
 
+# Without --yes: backup question first, then the user must type BORRAR exactly
+t_uninstall_all_without_yes_needs_borrar() {
+  load_setup; mk_instance
+  confirm() { echo "$1" >> "$SB/prompts"; return 1; }   # "no" to the backup
+  local out rc; out="$(uninstall --all 2>&1 <<<"BORRAR")"; rc=$?
+  assert_eq "rc" 0 "$rc"
+  assert_has "avisa" "$out" "Todo eliminado"
+  assert_eq "sin volúmenes" "" "$(cat "$SB/fake/volumes")"
+  [[ ! -e "$ENV_FILE" ]] && ok || nok "debía borrar .env"
+  assert_has "ofrece el respaldo antes" "$(cat "$SB/prompts" 2>/dev/null)" "respaldo antes de borrar"
+}
+
+t_uninstall_all_without_borrar_deletes_nothing() {
+  local word out rc
+  for word in "" "borrar" "si" "BORRAR TODO"; do
+    load_setup; mk_instance
+    confirm() { return 1; }
+    out="$(uninstall --all 2>&1 <<<"$word")"; rc=$?
+    assert_eq "rc con '$word'" 0 "$rc"
+    assert_has "cancela con '$word'" "$out" "Cancelado. No se borró nada."
+    assert_lacks "no dice que borró con '$word'" "$out" "Todo eliminado"
+    assert_eq "volúmenes intactos con '$word'" "${#ALL_VOLUMES[@]}" "$(grep -c . "$SB/fake/volumes")"
+    [[ -f "$ENV_FILE" ]] && ok || nok "debía conservar .env con '$word'"
+    assert_eq "conserva el registro con '$word'" "$SCRIPT_DIR" "$(cat "$(registry_file)" 2>/dev/null)"
+  done
+}
+
+t_uninstall_all_backup_yes_runs_backup_first() {
+  load_setup; mk_instance
+  backup() { echo called > "$SB/backup-called"; }
+  confirm() { return 0; }   # "sí" to the backup
+  ( uninstall --all >/dev/null 2>&1 <<<"no" )
+  assert_eq "hizo el respaldo" "called" "$(cat "$SB/backup-called" 2>/dev/null)"
+  [[ -f "$ENV_FILE" ]] && ok || nok "sin BORRAR conserva .env aunque haya respaldado"
+}
+
 for t in t_clean_does_not_delete_backups t_clean_still_rotates_logs \
+         t_uninstall_all_without_yes_needs_borrar t_uninstall_all_without_borrar_deletes_nothing \
+         t_uninstall_all_backup_yes_runs_backup_first \
          t_rollback_stashes_local_changes t_rollback_keeps_changes_when_stash_is_declined \
          t_rollback_yes_does_not_prompt t_rollback_clean_tree_still_resets_and_rebuilds \
          t_uninstall_all_keeps_env_and_registry_when_a_volume_fails t_uninstall_all_still_removes_everything \

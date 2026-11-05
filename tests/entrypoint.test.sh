@@ -21,20 +21,8 @@ cleanup() {
   rm -rf "$TMP"
 }
 trap cleanup EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
-
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else nok "$1: esperado '$2', obtenido '$3'"; fi; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3' en: $2"; fi; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   if [[ "${AIWS_TEST_REQUIRE:-}" == 1 ]]; then echo "FALTA la imagen $IMAGE (AIWS_TEST_REQUIRE=1)" >&2; exit 1; fi

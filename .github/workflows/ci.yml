@@ -36,7 +36,7 @@ jobs:
       - name: ShellCheck (nivel warning, siguiendo los módulos de lib/)
         timeout-minutes: 10
         run: |
-          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh scripts/*.sh tests/*.test.sh tests/helpers/*.sh
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d -x --source-path=SCRIPTDIR -S warning install.sh setup.sh aiws entrypoint.sh config/devdb config/ws-doctor config/extra-root.sh config/seed-guide.sh config/fetch-script.sh migrations/*.sh scripts/*.sh tests/*.test.sh tests/run-all.sh tests/helpers/*.sh
           # Los módulos de lib/ comparten variables con setup.sh (colores, datos de la instancia): SC2034/SC2154 no aplican
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d -x --source-path=SCRIPTDIR -S warning -e SC2034,SC2154 lib/*.sh
       - name: Pruebas de multi-instancia
@@ -81,6 +81,9 @@ jobs:
       - name: Pruebas de clean, rollback y uninstall --all
         timeout-minutes: 5
         run: bash tests/maintenance.test.sh
+      - name: Pruebas de add-key y components
+        timeout-minutes: 5
+        run: bash tests/commands.test.sh
       - name: docker compose config
         timeout-minutes: 5
         run: |

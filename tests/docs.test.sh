@@ -14,18 +14,8 @@ README="$ROOT/README.md"
 DOCS="$ROOT/docs"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
-
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
 DOC_FILES=(instancias configuracion operacion herramientas solucion-de-problemas desarrollo)
 MD_FILES() { echo "$README"; local d; for d in "${DOC_FILES[@]}"; do echo "$DOCS/$d.md"; done; }

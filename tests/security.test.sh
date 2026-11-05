@@ -15,19 +15,8 @@ HADOLINT_CFG="$ROOT/.hadolint.yaml"
 TRIVY_IGNORE="$ROOT/.trivyignore"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PASSES="$TMP/passes"; FAILS="$TMP/fails"; : > "$PASSES"; : > "$FAILS"
-
-ok()  { echo x >> "$PASSES"; return 0; }
-nok() { echo "    FAIL: $*" >&2; echo x >> "$FAILS"; return 0; }
-assert_has() { if [[ "$2" == *"$3"* ]]; then ok; else nok "$1: debía contener '$3'"; fi; return 0; }
-
-run() {
-  echo "== $1"
-  ( "$1" )
-  local rc=$?
-  if (( rc != 0 )); then nok "$1 terminó con código $rc"; fi
-  return 0
-}
+# shellcheck source=tests/helpers/asserts.sh
+source "$ROOT/tests/helpers/asserts.sh"
 
 t_ci_runs_on_a_schedule() {
   grep -qE '^  schedule:' "$CI" && ok || nok "ci.yml no tiene 'schedule:'"
@@ -68,7 +57,7 @@ t_ci_step_names_are_valid_yaml() {      # "name: texto: otro" sin comillas rompe
 
 t_every_test_script_is_shellchecked() {   # un script que ShellCheck no revisa puede esconder errores de shell
   local f n d line; line="$(grep -E 'koalaman/shellcheck' "$CI")"
-  for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/helpers/*.sh "$ROOT"/scripts/*.sh "$ROOT"/lib/*.sh; do
+  for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/run-all.sh "$ROOT"/tests/helpers/*.sh "$ROOT"/scripts/*.sh "$ROOT"/lib/*.sh; do
     [[ -f "$f" ]] || continue
     d="$(basename "$(dirname "$f")")"; n="$d/$(basename "$f")"
     [[ "$line" == *"$n"* || "$line" == *"$d/*.test.sh"* || "$line" == *"$d/*.sh"* ]] && ok || nok "$n no está en la lista de ShellCheck de ci.yml"
@@ -154,7 +143,33 @@ t_dependabot_watches_landing_npm() {
   assert_has "grupos npm" "$block" "groups:"
 }
 
+t_tests_share_one_assert_helper() {   # a fix to an assert must not need 16 copies
+  local f n
+  [[ -f "$ROOT/tests/helpers/asserts.sh" ]] && ok || { nok "falta tests/helpers/asserts.sh"; return 0; }
+  for f in "$ROOT"/tests/*.test.sh; do
+    n="$(basename "$f")"
+    grep -qE '^source "\$ROOT/tests/helpers/asserts\.sh"' "$f" && ok || nok "$n no carga tests/helpers/asserts.sh"
+    if grep -qE '^(ok|nok|run|assert_(eq|has|lacks|ok|fail|match|file))\(\)' "$f"; then nok "$n redefine asserts del helper"; else ok; fi
+  done
+}
+
+t_run_all_fails_when_any_test_fails() {
+  local runner="$ROOT/tests/run-all.sh" d="$TMP/suite" out rc
+  [[ -f "$runner" ]] || { nok "falta tests/run-all.sh"; return 0; }
+  mkdir -p "$d"
+  printf '#!/usr/bin/env bash\necho bien\n' > "$d/a.test.sh"
+  printf '#!/usr/bin/env bash\necho mal; exit 1\n' > "$d/b.test.sh"
+  out="$(AIWS_TESTS_DIR="$d" bash "$runner" 2>&1)"; rc=$?
+  assert_eq "run-all con un test roto: código" "1" "$rc"
+  assert_has "run-all nombra el test roto" "$out" "b.test.sh"
+  rm "$d/b.test.sh"
+  out="$(AIWS_TESTS_DIR="$d" bash "$runner" 2>&1)"; rc=$?
+  assert_eq "run-all con todo en verde: código" "0" "$rc"
+  assert_has "run-all cuenta los tests" "$out" "1 ok, 0 fallidos"
+}
+
 for t in t_ci_runs_on_a_schedule t_has_a_security_job t_scanners_are_pinned_not_latest \
+         t_tests_share_one_assert_helper t_run_all_fails_when_any_test_fails \
          t_ci_cancels_superseded_runs t_every_step_has_a_timeout t_build_uses_layer_cache \
          t_tool_images_pinned_by_digest t_landing_is_built_and_audited t_dependabot_watches_landing_npm \
          t_repo_scan_blocks_only_actionable_findings t_image_is_scanned_after_build \
