@@ -16,12 +16,12 @@ Se ejecutan desde la carpeta de la instancia (`./setup.sh COMANDO` o `bash setup
 | `upgrade` | **Descarga lo último de GitHub**, migra y reconstruye (ver [Actualizar](#actualizar-a-la-última-versión)) |
 | `update` | Reconstruye la imagen sin caché **con las versiones fijadas** (las de tu `.env` o, si no hay, las del repo). `agy` siempre trae la última. Para versiones nuevas de las herramientas, usa `tools` |
 | `tools [--yes] [--reset]` | Busca versiones nuevas de las herramientas (npm y GitHub), muestra una tabla con lo que hay en la imagen, lo fijado y lo último, y te deja elegir cuáles aplicar: se guardan en el `.env` (nunca en los archivos del repo) y ofrece reconstruir. `--yes` aplica todo y reconstruye; `--reset` quita las versiones del `.env` y vuelve a las del repo. Al abrir el menú avisa si hay versiones nuevas (opción 11) |
-| `rollback` | Vuelve a la versión anterior al último `upgrade` y reconstruye |
+| `rollback [--yes]` | Vuelve a la versión anterior al último `upgrade` y reconstruye. Si tienes cambios locales en archivos del repo los guarda con `git stash` (pregunta antes, como `upgrade`; `--yes` no pregunta) |
 | `components` | Elige qué agentes y herramientas trae la imagen (y reconstruye) |
 | `resources [--mem 4g --cpus 2 ...]` | Ver límites y uso real, o cambiarlos sin reconstruir (`--set` pregunta cada valor, `--no-apply` solo guarda) |
-| `backup` | Respalda el home y los proyectos (incluidas las bases de `devdb`) en `./backups/*.tar.gz`, con su checksum `.sha256` |
+| `backup` | Respalda el home y los proyectos (incluidas las bases de `devdb`) en `./backups/*.tar.gz`, con su checksum `.sha256`. Los archivos son del usuario que ejecuta `setup.sh`, con permisos 600. Se escribe como `.partial` y solo se renombra al terminar bien: si falla no queda ningún respaldo con nombre válido y las bases locales se vuelven a arrancar. Conserva los últimos 5 respaldos (`AIWS_BACKUP_KEEP`); cada `.sha256` se borra junto con su respaldo |
 | `restore [ARCHIVO] [--yes]` | Restaura un respaldo (por defecto el más reciente de la instancia). Verifica el checksum, rechaza respaldos de otra instancia, **reemplaza** el contenido de home y proyectos y antes hace un respaldo de seguridad del estado actual (ese respaldo no borra respaldos viejos). Si la extracción falla, vuelve al respaldo de seguridad y termina con error. Si el workspace está corriendo lo detiene y lo vuelve a arrancar |
-| `clean [--deep]` | Limpia imágenes viejas, logs y respaldos antiguos |
+| `clean [--deep]` | Limpia imágenes viejas y logs antiguos (los respaldos solo rotan con `backup`) |
 | `migrate` | Aplica manualmente las migraciones pendientes |
 | `add-key` | Autoriza una clave SSH. Sin argumento la pide para **pegar**; también acepta `'ssh-ed25519 AAAA...'`, `RUTA.pub` o `github:usuario` |
 | `status` / `logs` | Estado y registros de los contenedores |
@@ -31,7 +31,7 @@ Se ejecutan desde la carpeta de la instancia (`./setup.sh COMANDO` o `bash setup
 | `ts-status` | Estado de Tailscale |
 | `down` | Detiene los contenedores; los volúmenes se conservan |
 | `uninstall` | Quita contenedores, red e imagen. **Conserva** datos, `.env` e identidades; `install` lo deja como estaba |
-| `uninstall --all` | **Borra todo**: proyectos, home, bases de datos, identidad SSH, el equipo en Tailscale y `.env`. Ofrece respaldo y pide escribir `BORRAR` |
+| `uninstall --all` | **Borra todo**: proyectos, home, bases de datos, identidad SSH, el equipo en Tailscale y `.env`. Ofrece respaldo y pide escribir `BORRAR`. Si algún volumen no se puede borrar (p. ej. lo usa otro contenedor), lo nombra, conserva `.env` y el registro de la instancia y termina con error: corrige y repítelo |
 
 ### Actualizar a la última versión
 
@@ -55,7 +55,7 @@ aiws upgrade --all        # todas las instancias
 **Si una actualización sale mal:**
 
 ```bash
-./setup.sh rollback       # vuelve a la versión que tenías antes del último upgrade y reconstruye
+./setup.sh rollback       # vuelve a la versión que tenías antes del último upgrade y reconstruye (guarda tus cambios locales con git stash)
 ```
 
 Si el build falla, el contenedor anterior **sigue funcionando**: solo se reemplaza cuando la imagen nueva se construye bien. Antes de actualizar un servidor, comprueba que el CI de `main` esté en verde (ver [CI](desarrollo.md#verificación-automática-ci)).
@@ -80,9 +80,9 @@ Si el build falla, el contenedor anterior **sigue funcionando**: solo se reempla
 - **`./setup.sh clean`** (menú → 8, y automático después de cada `update`):
   - borra las imágenes viejas que quedan al reconstruir, solo las de esa instancia, gracias a las etiquetas `org.ai-workspace.image` y `org.ai-workspace.instance`;
   - conserva los últimos 20 logs;
-  - conserva los últimos 5 respaldos.
+  - **no** borra respaldos: esos rotan solo al ejecutar `./setup.sh backup` (se conservan los últimos 5, cada uno con su `.sha256`).
 - **`./setup.sh clean --deep`** también borra la caché de build y las imágenes sin uso de **todo** Docker del servidor. Pide confirmación.
-- Límites configurables: `AIWS_LOG_KEEP=50 AIWS_BACKUP_KEEP=10 ./setup.sh clean`.
+- Límites configurables: `AIWS_LOG_KEEP=50 ./setup.sh clean` y `AIWS_BACKUP_KEEP=10 ./setup.sh backup`.
 
 ### Volúmenes
 

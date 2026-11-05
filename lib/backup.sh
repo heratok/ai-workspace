@@ -9,7 +9,7 @@ confirm() {   # confirm "pregunta" -> 0 si responde s/S
 }
 
 backup() {   # backup [--no-rotate]: deja la ruta del respaldo en LAST_BACKUP (vacía si no hubo)
-  local dest="$SCRIPT_DIR/backups" file v mounts=() rotate=true
+  local dest="$SCRIPT_DIR/backups" file v mounts=() rotate=true img sum written=false
   [[ "${1:-}" == --no-rotate ]] && rotate=false
   LAST_BACKUP=""
   for v in "${VOLUMES[@]}"; do
@@ -18,25 +18,46 @@ backup() {   # backup [--no-rotate]: deja la ruta del respaldo en LAST_BACKUP (v
   (( ${#mounts[@]} )) || { warn "No hay volúmenes de datos que respaldar."; return 0; }
   mkdir -p "$dest"; chmod 700 "$dest"
   file="$AIWS_NAME-$(date +%Y%m%d-%H%M%S).tar.gz"
+  img="$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)"
   # Si PostgreSQL local está corriendo, se detiene para un respaldo consistente
   docker exec -u "$WS_USER" "$CONTAINER" devdb stop all >/dev/null 2>&1 || true
   info "Respaldando home y proyectos -> backups/$file"
-  docker run --rm "${mounts[@]}" -v "$dest:/b" --entrypoint tar \
-    "$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)" \
-    czf "/b/$file" -C /v .
-  chmod 600 "$dest/$file" 2>/dev/null || true
+  # tar sale por stdout: el archivo lo crea este usuario (umask 077 -> 600), no root dentro del contenedor.
+  # Se escribe como .partial y solo se renombra si tar terminó bien (nunca queda un respaldo a medias con nombre válido).
+  if ( umask 077; docker run --rm "${mounts[@]}" --entrypoint tar "$img" czf - -C /v . > "$dest/$file.partial" ) \
+     && [[ -s "$dest/$file.partial" ]] && mv -f -- "$dest/$file.partial" "$dest/$file"; then
+    written=true
+  fi
+  docker exec -u "$WS_USER" "$CONTAINER" devdb autostart >/dev/null 2>&1 || true   # reanuda BD con autostart (también si falló)
+  if [[ "$written" != true ]]; then
+    rm -f -- "$dest/$file.partial"
+    die "El respaldo falló; no se guardó ningún archivo."
+  fi
   # Checksum junto al respaldo: "restore" lo verifica antes de tocar nada
   if command -v sha256sum >/dev/null 2>&1; then
-    ( cd "$dest" && sha256sum "$file" > "$file.sha256" ) && chmod 600 "$dest/$file.sha256" 2>/dev/null || true
+    sum="$(sha256sum < "$dest/$file" | cut -d' ' -f1)" \
+      && ( umask 077; echo "$sum  $file" > "$dest/$file.sha256" ) || warn "No se pudo escribir $file.sha256"
   fi
-  docker exec -u "$WS_USER" "$CONTAINER" devdb autostart >/dev/null 2>&1 || true   # reanuda BD con autostart
   info "Respaldo listo: $dest/$file ($(du -h "$dest/$file" | cut -f1))"
   LAST_BACKUP="$dest/$file"
-  if [[ "$rotate" == true ]]; then
-    keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz" "$BACKUP_KEEP"
-    keep_newest "$dest" "$AIWS_NAME-[0-9]*.tar.gz.sha256" "$BACKUP_KEEP"
-  fi
+  [[ "$rotate" == true ]] && rotate_backups
   echo "    Restaurar: ./setup.sh restore $file"
+}
+
+rotate_backups() {   # conserva los BACKUP_KEEP respaldos más nuevos; cada .sha256 se borra con su archivo
+  local dest="$SCRIPT_DIR/backups" f own=()
+  # Solo nombres de ESTA instancia: el glob "ai-workspace-[0-9]*" también coincide con el alias "2"
+  while IFS= read -r f; do
+    is_own_backup_name "$(basename "$f")" && own+=("$f")
+  done < <(ls -1t "$dest/$AIWS_NAME"-*.tar.gz 2>/dev/null || true)
+  if (( ${#own[@]} > BACKUP_KEEP )); then
+    for f in "${own[@]:$BACKUP_KEEP}"; do rm -f -- "$f" && echo "    borrado: ${f#"$SCRIPT_DIR"/}"; done
+  fi
+  for f in "$dest/$AIWS_NAME"-*.tar.gz.sha256; do   # sin huérfanos (también los que dejó la rotación anterior)
+    [[ -f "$f" && ! -e "${f%.sha256}" ]] && is_own_backup_name "$(basename "${f%.sha256}")" || continue
+    rm -f -- "$f" && echo "    borrado: ${f#"$SCRIPT_DIR"/}"
+  done
+  return 0
 }
 
 # ------------------------------------------------------------ restauración

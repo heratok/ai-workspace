@@ -159,7 +159,7 @@ main() {
     progress)  follow ;;
     resources) resources "$@" ;;
     upgrade|self-update) check_prereqs; upgrade "$@" ;;
-    rollback)  check_prereqs; rollback ;;
+    rollback)  check_prereqs; rollback "$@" ;;
     clean)     check_prereqs; clean "$@" ;;
     components) components_cmd ;;
     migrate)   run_migrations ;;

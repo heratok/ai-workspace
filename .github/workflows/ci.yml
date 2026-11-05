@@ -52,6 +52,8 @@ jobs:
         run: bash tests/pins.test.sh
       - name: Pruebas de la descarga de instaladores
         run: bash tests/fetch-script.test.sh
+      - name: Pruebas de clean, rollback y uninstall --all
+        run: bash tests/maintenance.test.sh
       - name: docker compose config
         run: |
           cp env.example .env
