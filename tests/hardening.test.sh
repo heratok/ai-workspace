@@ -22,7 +22,7 @@ service_block() { awk -v s="$1" '$0 ~ "^  "s":" {on=1; next} on && /^  [A-Za-z0-
 list_of() { service_block "$1" | awk -v k="$2" '$0 ~ "^    "k":" {on=1; next} on && /^      - / {sub(/^      - /,""); gsub(/["\047 ]/,""); sub(/#.*/,""); print; next} on {exit}' | sort | paste -sd, -; }
 
 WS=ai-workspace
-REQUIRED_CAPS="CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,SYS_CHROOT"
+REQUIRED_CAPS="AUDIT_WRITE,CHOWN,DAC_OVERRIDE,FOWNER,KILL,SETGID,SETUID,SYS_CHROOT"
 
 t_drops_all_capabilities() {
   assert_eq "cap_drop del workspace" "ALL" "$(list_of $WS cap_drop)"
@@ -30,6 +30,13 @@ t_drops_all_capabilities() {
 
 t_adds_only_the_measured_capabilities() {
   assert_eq "cap_add del workspace" "$REQUIRED_CAPS" "$(list_of $WS cap_add)"
+}
+
+t_sshd_can_open_interactive_sessions() {    # sin estas, sshd cierra la sesión con pty justo tras autenticar
+  local caps c; caps=",$(list_of $WS cap_add),"
+  for c in AUDIT_WRITE KILL; do
+    [[ "$caps" == *",$c,"* ]] && ok || nok "falta $c en cap_add del workspace (audit_session_open / kill de los hijos de sshd)"
+  done
 }
 
 t_workspace_has_no_dangerous_privileges() {
@@ -68,7 +75,8 @@ t_workspace_has_stop_grace_period() {         # tiempo para que el entrypoint de
   assert_eq "stop_grace_period del workspace" "30s" "$(service_block $WS | awk '/^    stop_grace_period:/ {print $2}')"
 }
 
-for t in t_drops_all_capabilities t_adds_only_the_measured_capabilities t_workspace_has_no_dangerous_privileges \
+for t in t_drops_all_capabilities t_adds_only_the_measured_capabilities t_sshd_can_open_interactive_sessions \
+         t_workspace_has_no_dangerous_privileges \
          t_keeps_no_new_privileges t_tailscale_keeps_only_net_admin t_sshd_allows_only_local_forwarding \
          t_every_service_limits_its_logs t_workspace_has_stop_grace_period; do
   run "$t"

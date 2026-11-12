@@ -30,7 +30,7 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 # Mismas capacidades y opciones que el servicio ai-workspace de docker-compose.yml
-CAPS=(--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add SYS_CHROOT)
+CAPS=(--cap-drop ALL --cap-add AUDIT_WRITE --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_CHROOT)
 
 # start_ws <nombre>: contenedor con volúmenes propios y el código del repo montado encima de la imagen
 start_ws() {
