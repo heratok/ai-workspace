@@ -19,6 +19,7 @@
 | Alerta "host key changed" al conectar por SSH | Se borró el volumen `ai_ssh_host_keys`. Quita la entrada vieja de `~/.ssh/known_hosts` |
 | El nodo pide auth key otra vez | Se borró el volumen `ai_ts_state`: es un nodo nuevo. Pega una auth key o usa el link de login |
 | No entro por SSH | Comprueba `./setup.sh ts-status` y `./setup.sh doctor`. Si no autorizaste tu clave: `./setup.sh add-key` |
+| No entro por SSH: la sesión se cierra justo después de autenticar ("closed by remote host", "Exit status -1") | El log del contenedor muestra `linux_audit_write_entry failed: Operation not permitted` o `cleanup_exit: kill(...): Operation not permitted`: al servicio `workspace` le faltan `AUDIT_WRITE` y `KILL` en `cap_add` (versiones anteriores del compose). Actualiza con `./setup.sh upgrade` y recrea el contenedor con `./setup.sh down && ./setup.sh install` |
 | Permisos incorrectos en el home tras cambiar `USER_UID` / `USER_GID` | Pon `FIX_OWNERSHIP=true` una sola vez y ejecuta `./setup.sh update` |
 | El frontend no abre en `:3000` / `:5173` | El servidor de desarrollo debe escuchar en `0.0.0.0` (p. ej. `vite --host`) |
 | `ERR_CONNECTION_REFUSED` en `localhost:PUERTO` al hacer login de una herramienta | El callback apunta al `localhost` de tu PC. Abre un túnel `ssh -L`: ver [Login OAuth con callback en localhost](herramientas.md#login-oauth-con-callback-en-localhost) |

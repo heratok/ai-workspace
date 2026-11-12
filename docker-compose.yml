@@ -109,9 +109,11 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      - AUDIT_WRITE      # sshd: audit_session_open al abrir una sesión con pty (sin ella cierra tras autenticar)
       - CHOWN            # entrypoint: dueño de home/workspace y de ~/.ssh
       - DAC_OVERRIDE     # root lee/escribe en volúmenes y directorios 700 del usuario
       - FOWNER           # chmod/utimes sobre archivos del usuario (authorized_keys, dotfiles)
+      - KILL             # sshd (root): enviar señales a los procesos de la sesión, que corren como ai
       - SETGID           # sshd: separación de privilegios y cambio al usuario
       - SETUID           # sshd: separación de privilegios y cambio al usuario
       - SYS_CHROOT       # sshd: chroot de separación de privilegios (/run/sshd)
