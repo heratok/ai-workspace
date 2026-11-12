@@ -9,7 +9,7 @@ Todo esto queda instalado al construir la imagen; no hay que instalar nada a man
 | Categoría | Herramientas |
 |---|---|
 | Git y GitHub | `git`, `git-lfs`, `gh` (GitHub CLI, desde su repo oficial) |
-| Lenguajes | Node 24 (`npm`, `corepack` → `pnpm`/`yarn`), Python 3 (`uv`, `venv`), `mise` para Go, Rust, Java, otras versiones de Node/Python, etc. (sin root) |
+| Lenguajes | Node 24 (`npm`, `pnpm` fijado con `PNPM_VERSION`, `yarn` vía `corepack`), Python 3 (`uv`, `venv`), `mise` para Go, Rust, Java, otras versiones de Node/Python, etc. (sin root) |
 | Compilación | `build-essential`, `pkg-config`, `make`, `libpq-dev` (para módulos nativos de npm y pip) |
 | Bases de datos | Clientes `psql`/`pg_dump` 17, `sqlite3`, `redis-cli`, `mariadb`/`mysql`. **Servidores bajo demanda sin root:** `devdb install postgres` y `devdb install redis`. `sqlcmd`/`bcp` opcionales |
 | Secretos | **Doppler CLI** (`doppler login`, `doppler run -- …`) |

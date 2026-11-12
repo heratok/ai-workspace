@@ -38,7 +38,7 @@ exit 0
 EOF
   chmod +x "$SB/bin/docker"
   cp -r "$ROOT/setup.sh" "$ROOT/lib" "$ROOT/scripts" "$ROOT/Dockerfile" "$ROOT/docker-compose.yml" "$ROOT/env.example" "$SB/repo/"
-  seed CLAUDE_CODE_VERSION 2.1.296; seed PI_VERSION 0.73.1; seed OPENCODE_VERSION 1.19.0
+  seed CLAUDE_CODE_VERSION 2.1.296; seed PI_VERSION 0.73.1; seed OPENCODE_VERSION 1.19.0; seed PNPM_VERSION 12.18.0
   seed PLAYWRIGHT_VERSION 1.64.0; seed PLAYWRIGHT_CLI_VERSION 0.1.22; seed PLAYWRIGHT_MCP_VERSION 0.0.83
   seed UV_VERSION 0.13.0; seed MISE_VERSION v2026.10.8; seed TS_IMAGE_TAG v1.104.1
   seed HERDR_VERSION 0.9.4; seed HERDR_SHA256_AMD64 "$SHA_C"; seed HERDR_SHA256_ARM64 "$SHA_D"

@@ -27,7 +27,7 @@ mk_root() {
   mk_fixtures
   R="$TMP/root.$RANDOM"; mkdir -p "$R"
   cp "$ROOT/Dockerfile" "$ROOT/docker-compose.yml" "$ROOT/env.example" "$R/"
-  seed_pin CLAUDE_CODE_VERSION 2.1.296; seed_pin PI_VERSION 0.73.1; seed_pin OPENCODE_VERSION 1.19.0
+  seed_pin CLAUDE_CODE_VERSION 2.1.296; seed_pin PI_VERSION 0.73.1; seed_pin OPENCODE_VERSION 1.19.0; seed_pin PNPM_VERSION 12.18.0
   seed_pin PLAYWRIGHT_VERSION 1.64.0; seed_pin PLAYWRIGHT_CLI_VERSION 0.1.22; seed_pin PLAYWRIGHT_MCP_VERSION 0.0.83
   seed_pin UV_VERSION 0.13.0; seed_pin MISE_VERSION v2026.10.8; seed_pin TS_IMAGE_TAG v1.104.1
   seed_pin HERDR_VERSION 0.9.4; seed_pin HERDR_SHA256_AMD64 "$SHA_C"; seed_pin HERDR_SHA256_ARM64 "$SHA_D"
@@ -198,7 +198,7 @@ t_check_tsv_reports_each_tool_with_its_status() {
   assert_eq "playwright desactualizado" "outdated" "$(tsv_field playwright 6 "$out")"
   assert_eq "mise desactualizado (con v)" "v2026.10.8|v2026.10.9|outdated" "$(tsv_field mise 3 "$out")|$(tsv_field mise 4 "$out")|$(tsv_field mise 6 "$out")"
   assert_eq "doppler desactualizado" "outdated" "$(tsv_field doppler 6 "$out")"
-  for t in pi playwright-cli playwright-mcp uv tailscale herdr gentle-ai opencode; do assert_eq "$t al día" "ok" "$(tsv_field "$t" 6 "$out")"; done
+  for t in pi pnpm playwright-cli playwright-mcp uv tailscale herdr gentle-ai opencode; do assert_eq "$t al día" "ok" "$(tsv_field "$t" 6 "$out")"; done
   assert_eq "origen del repo" "repo" "$(tsv_field claude-code 5 "$out")"
 }
 

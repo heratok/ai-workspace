@@ -21,6 +21,7 @@ ARG NODE_VERSION=""
 ARG CLAUDE_CODE_VERSION=2.1.296
 ARG PI_VERSION=0.73.1
 ARG OPENCODE_VERSION=1.19.0
+ARG PNPM_VERSION=12.18.0
 ARG PLAYWRIGHT_VERSION=1.64.0
 ARG PLAYWRIGHT_CLI_VERSION=0.1.22
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
@@ -121,7 +122,7 @@ RUN case "$(dpkg --print-architecture)" in \
  && curl -fsSL "https://nodejs.org/dist/${v}/SHASUMS256.txt" | grep " ${f}\$" | sha256sum -c - \
  && tar -xJf "${f}" -C /usr/local --strip-components=1 --no-same-owner \
  && rm -f "${f}" \
- && (corepack enable || true) \
+ && (corepack enable yarn || true) \
  && node --version && npm --version
 
 # ---------------------------------------------------------------------------
@@ -133,8 +134,9 @@ RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH
 
 # ---------------------------------------------------------------------------
 # 4. CLIs globales de npm horneadas en la imagen (/usr/local)
+#    pnpm va siempre y fijado (corepack solo activa yarn: su shim de pnpm chocaría con este y descargaría al usarlo)
 # ---------------------------------------------------------------------------
-RUN pkgs=() \
+RUN pkgs=("pnpm@${PNPM_VERSION:-latest}") \
  && if [[ "${INSTALL_CLAUDE}" == "true" ]];     then pkgs+=("@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"); fi \
  && if [[ "${INSTALL_PI}" == "true" ]];         then pkgs+=("@mariozechner/pi-coding-agent@${PI_VERSION:-latest}"); fi \
  && if [[ "${INSTALL_OPENCODE}" == "true" ]];   then pkgs+=("opencode-ai@${OPENCODE_VERSION:-latest}"); fi \
@@ -267,7 +269,7 @@ RUN yn() { [[ "$1" == "true" ]] && echo sí || echo no; } \
 # Versiones fijadas que contiene esta imagen: "./setup.sh tools" las lee para mostrar lo que hay REALMENTE instalado.
 # (UV_VERSION se declara antes del primer FROM; aquí se vuelve a declarar para verla en esta etapa.)
 ARG UV_VERSION
-LABEL org.ai-workspace.versions="claude-code=${CLAUDE_CODE_VERSION},pi=${PI_VERSION},opencode=${OPENCODE_VERSION},playwright=${PLAYWRIGHT_VERSION},playwright-cli=${PLAYWRIGHT_CLI_VERSION},playwright-mcp=${PLAYWRIGHT_MCP_VERSION},uv=${UV_VERSION},mise=${MISE_VERSION},herdr=${HERDR_VERSION},gentle-ai=${GENTLE_AI_VERSION},doppler=${DOPPLER_VERSION}"
+LABEL org.ai-workspace.versions="claude-code=${CLAUDE_CODE_VERSION},pi=${PI_VERSION},opencode=${OPENCODE_VERSION},pnpm=${PNPM_VERSION},playwright=${PLAYWRIGHT_VERSION},playwright-cli=${PLAYWRIGHT_CLI_VERSION},playwright-mcp=${PLAYWRIGHT_MCP_VERSION},uv=${UV_VERSION},mise=${MISE_VERSION},herdr=${HERDR_VERSION},gentle-ai=${GENTLE_AI_VERSION},doppler=${DOPPLER_VERSION}"
 
 ENV WORKSPACE_USER=${USERNAME}
 WORKDIR /workspace
