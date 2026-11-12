@@ -44,7 +44,7 @@ aiws upgrade --all        # todas las instancias
 2. Si tienes cambios locales en archivos del repo, los guarda aparte con `git stash` antes de actualizar.
 3. Aplica las migraciones pendientes.
 4. Agrega a tu `.env` las variables **nuevas** de `env.example`, sin tocar las que ya tienes.
-5. Ofrece reconstruir la imagen (`update`, en segundo plano). Tus datos y volúmenes no se tocan.
+5. Ofrece aplicar la versión nueva (`update`, en segundo plano): descarga la imagen publicada por el CI o la construye en el servidor (ver [De dónde sale la imagen](#de-dónde-sale-la-imagen)). Tus datos y volúmenes no se tocan.
 
 **Sin preguntas:** `./setup.sh upgrade --yes` guarda aparte los cambios locales, actualiza y reconstruye. Si ya está al día lo informa y no reconstruye (salvo `--rebuild`); `--foreground` se pasa al `update`. Sin `--yes` conserva las preguntas y exige una terminal: sin ella falla con un mensaje en lugar de aparentar éxito.
 
@@ -58,7 +58,24 @@ aiws upgrade --all        # todas las instancias
 ./setup.sh rollback       # vuelve a la versión que tenías antes del último upgrade y reconstruye (guarda tus cambios locales con git stash)
 ```
 
-Si el build falla, el contenedor anterior **sigue funcionando**: solo se reemplaza cuando la imagen nueva se construye bien. Antes de actualizar un servidor, comprueba que el CI de `main` esté en verde (ver [CI](desarrollo.md#verificación-automática-ci)).
+Si la descarga o el build fallan, el contenedor anterior **sigue funcionando**: solo se reemplaza cuando la imagen nueva está lista. Antes de actualizar un servidor que construye localmente, comprueba que el CI de `main` esté en verde (ver [CI](desarrollo.md#verificación-automática-ci)); uno que descarga la imagen lo comprueba solo.
+
+### De dónde sale la imagen
+
+El CI publica en `ghcr.io/heratok/ai-workspace` (paquete público, sin login) la imagen que pasó escaneos y pruebas. Su etiqueta es `ctx-<hash>`, un hash de lo que entra en la imagen (`Dockerfile`, `.dockerignore`, `entrypoint.sh` y `config/`), así que un commit que solo cambia documentación reutiliza la imagen ya publicada. `install`, `update`, `upgrade` y `rollback` **descargan** esa imagen, en un par de minutos en vez de construir 5 GB, cuando se cumple todo esto:
+
+- `AIWS_IMAGE_SOURCE=auto` en el `.env` (el valor por defecto).
+- El servidor es amd64 (x86_64).
+- La carpeta es un clon de git, sin cambios locales en `Dockerfile`, `.dockerignore`, `entrypoint.sh` ni `config/`.
+- Todas las variables de build del `.env` tienen su valor por defecto: componentes (`INSTALL_*`), versiones fijadas, `USER_UID`/`USER_GID`, `NODE_VERSION`, `NPM_EXTRA_PACKAGES`, `PG_*`.
+
+Si algo de eso no se cumple, la imagen se **construye en el servidor**, como siempre, y el mensaje dice por qué (por ejemplo, `configuración propia en .env: INSTALL_OPENCODE`). Para construir siempre aquí: `AIWS_IMAGE_SOURCE=build` en el `.env`.
+
+Con la imagen de GHCR, `upgrade --rebuild` y `update` vuelven a **descargar** la etiqueta actual en vez de reconstruir: los parches de paquetes del sistema llegan cuando la corrida del lunes del CI vuelve a publicarla. Una rama o un fork (`AIWS_REPO_URL`, `AIWS_REPO_BRANCH`) y los commits locales que no están en `origin/main` siempre se construyen en el servidor, porque el CI solo publica `main` de este repo.
+
+**Si la imagen de esa versión todavía no está publicada** (el CI no terminó o falló), `upgrade` y `rollback` lo avisan y **no cambian nada**; `update` falla sin tocar el contenedor en marcha. Reintenta cuando el CI esté en verde, o usa `AIWS_IMAGE_SOURCE=build`.
+
+`clean` (corre tras cada `update`) borra las etiquetas viejas de `ghcr.io/heratok/ai-workspace` y deja solo la actual. Tus proyectos (`/workspace`) y tu configuración (`/home/ai`) viven en volúmenes: no dependen de cómo se obtuvo la imagen.
 
 ### Si se cae SSH durante la instalación
 

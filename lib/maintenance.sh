@@ -47,6 +47,7 @@ clean() {
   local -a flt=(--filter "label=org.ai-workspace.image=true")
   [[ -n "$INSTANCE" ]] && flt+=(--filter "label=org.ai-workspace.instance=$AIWS_NAME")   # solo las de esta instancia
   docker image prune -f "${flt[@]}" | tail -n1 || true
+  image_clean_old
   info "Logs: se conservan los últimos $LOG_KEEP"
   keep_newest "$LOG_DIR" '*-[0-9]*.log' "$LOG_KEEP"
   # Los respaldos no se tocan aquí (clean corre solo tras cada update): rotan al hacer "backup"
@@ -125,6 +126,7 @@ EOF
     echo "${c_ok}Cambios nuevos ($behind):${c_off}"
     g log --format='  %h %s (%cr)' "HEAD..origin/$REPO_BRANCH"
     g diff --stat "HEAD" "origin/$REPO_BRANCH" | tail -n 15
+    image_check_published "origin/$REPO_BRANCH" || die "Actualización cancelada."
     stash_local_changes "$yes" upgrade actualizar || { info "Cancelado."; return 0; }
     install -d -m 700 "$LOG_DIR"; g rev-parse HEAD > "$LOG_DIR/.prev-version"   # para rollback
     g merge -q --ff-only "origin/$REPO_BRANCH" || die "No se pudo actualizar sin conflictos (git status)."
@@ -172,6 +174,7 @@ rollback() {   # rollback [--yes|-y]: sin preguntas (los cambios locales se guar
   esac
   [[ -d "$SCRIPT_DIR/.git" && -s "$LOG_DIR/.prev-version" ]] || die "No hay una versión anterior registrada (solo existe tras un upgrade)."
   local prev; prev="$(cat "$LOG_DIR/.prev-version")"
+  image_check_published "$prev" || die "Rollback cancelado."
   echo "Volver de $(g log -1 --format='%h %s') a $(g log -1 --format='%h %s' "$prev")"
   if [[ "$yes" != true ]]; then confirm "¿Continuar? (luego se reconstruye la imagen)" || { info "Cancelado."; return 0; }; fi
   stash_local_changes "$yes" rollback "volver atrás" || { info "Cancelado."; return 0; }

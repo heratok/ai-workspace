@@ -107,12 +107,15 @@ Fijos en `docker-compose.yml` (no van en `.env`): los logs de Docker de cada ser
 - **Primera instalación:** el script pregunta *"¿Instalación completa o personalizada?"*. Si eliges la personalizada, muestra este menú.
 - **Después:** cambia la selección cuando quieras. El script guarda en `.env` (`INSTALL_*=true/false`) y ofrece reconstruir. Lo que desmarcas desaparece de la imagen; tus datos no se tocan.
 - **La base siempre viene:** git, gh, Node, Python/uv, mise, clientes de bases de datos, devdb, zsh y las herramientas de terminal.
+- **Imagen publicada o build local:** con la selección por defecto, el servidor descarga la imagen que publica el CI. Si cambias algún componente, la imagen se construye en el servidor (ver [De dónde sale la imagen](operacion.md#de-dónde-sale-la-imagen)).
 
 ### Versiones fijadas de la imagen
 
 Para que dos builds del mismo commit den la misma imagen, las herramientas llevan su versión fijada (en el `Dockerfile`, reenviada por `docker-compose.yml`; `env.example` las documenta **comentadas**). El valor por defecto sale del repo, así que `./setup.sh upgrade` te trae las versiones nuevas que el repo vaya fijando.
 
 **Para usar otra versión solo en tu servidor**, usa `./setup.sh tools`: busca versiones nuevas, te muestra una tabla (en la imagen, fijada, última, origen) y guarda en tu `.env` lo que elijas; luego reconstruye con `./setup.sh update`. `./setup.sh tools --reset` quita esas versiones del `.env` y vuelve a las del repo. En la tabla, origen `.env` significa que esa versión es una elección de este servidor y el repo ya no la actualiza. `latest` en una variable de npm vuelve a flotar (no reproducible).
+
+Una versión fijada distinta de la del repo hace que la imagen se construya en tu servidor en vez de descargar la publicada por el CI (ver [De dónde sale la imagen](operacion.md#de-dónde-sale-la-imagen)).
 
 | Variable | Qué fija |
 |----------|----------|

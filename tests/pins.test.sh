@@ -70,6 +70,21 @@ t_compose_defaults_match_dockerfile() {
   done
 }
 
+# La imagen de GHCR se construye con los ARG del Dockerfile; setup.sh la usa si el .env coincide con los
+# valores por defecto del compose. Si ambos difieren, un servidor "por defecto" bajaría otra imagen.
+t_every_build_arg_default_matches_dockerfile() {
+  local line a c d n=0
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]+([A-Z0-9_]+):\ \$\{([A-Z0-9_]+):-([^}]*)\} ]] || continue
+    a="${BASH_REMATCH[1]}"; c="${BASH_REMATCH[3]}"; n=$((n + 1))
+    [[ "${BASH_REMATCH[2]}" == "$a" ]] || { nok "$a se reenvía desde otra variable (${BASH_REMATCH[2]})"; continue; }
+    grep -qE "^ARG $a=" "$DOCKERFILE" || { nok "$a no tiene ARG con valor por defecto en el Dockerfile"; continue; }
+    d="$(default_of "$a")"
+    [[ "$c" == "$d" ]] && ok || nok "$a: compose='$c' Dockerfile='$d'"
+  done < <(sed -n '/^  ai-workspace:/,/^    image:/p' "$COMPOSE")
+  (( n >= 30 )) && ok || nok "se esperaban al menos 30 argumentos de build en el compose (encontrados: $n)"
+}
+
 t_env_example_documents_every_pin() {
   local a
   for a in "${ALL_PINS[@]}"; do
@@ -159,7 +174,7 @@ t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (
 }
 
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
-         t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile \
+         t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile t_every_build_arg_default_matches_dockerfile \
          t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out t_ci_checks_that_dotenv_pins_reach_the_build; do
   run "$t"
 done

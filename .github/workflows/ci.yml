@@ -87,6 +87,12 @@ jobs:
       - name: Pruebas del filtro de jobs por archivos cambiados
         timeout-minutes: 5
         run: bash tests/ci-changes.test.sh
+      - name: Pruebas de la etiqueta de la imagen (hash del contexto de build)
+        timeout-minutes: 5
+        run: bash tests/image-tag.test.sh
+      - name: Pruebas del origen de la imagen (GHCR o build en el servidor)
+        timeout-minutes: 10
+        run: bash tests/image.test.sh
       - name: docker compose config
         timeout-minutes: 5
         run: |
@@ -161,7 +167,16 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: bash scripts/ci-changes.sh "$EVENT" "$BASE" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+        # En main, si la imagen de este contexto no está en GHCR (la corrida que la traía se canceló o falló),
+        # se construye igual aunque este commit no toque la imagen: si no, los servidores nunca la tendrían.
+        run: |
+          out="$(bash scripts/ci-changes.sh "$EVENT" "$BASE" "$GITHUB_SHA")"
+          tag="$(bash scripts/image-tag.sh)"
+          if [[ "$GITHUB_REF" == refs/heads/main && "$out" == *image=false* ]] \
+             && ! docker manifest inspect "ghcr.io/heratok/ai-workspace:$tag" >/dev/null 2>&1; then
+            out="${out/image=false/image=true}"
+          fi
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
 
   build:
     needs: [lint, changes]
@@ -221,6 +236,50 @@ jobs:
               echo "ok guía: $c"
             done
             ws-doctor --guide | grep -q "Guía del entorno"'
+
+  # Publica en GHCR (paquete público) la imagen que acaba de pasar build, para que los servidores con la
+  # configuración por defecto la descarguen en vez de construirla. Solo desde main (push, corrida del lunes o manual);
+  # los PR nunca publican. Etiqueta: ctx-<hash del contexto de build> (scripts/image-tag.sh, la misma que calcula
+  # setup.sh) y latest. Si build se saltó (cambio sin efecto en la imagen), la etiqueta ya existe y no se publica.
+  # Reconstruye desde la caché de capas que acaba de guardar build, así que publica las mismas capas probadas.
+  publish:
+    needs: [build, security]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        timeout-minutes: 5
+      - name: Etiqueta de la imagen
+        id: tag
+        timeout-minutes: 5
+        run: |
+          tag="$(bash scripts/image-tag.sh)"
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        timeout-minutes: 5
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publicar en GHCR
+        timeout-minutes: 30
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ghcr.io/heratok/ai-workspace:${{ steps.tag.outputs.tag }}
+            ghcr.io/heratok/ai-workspace:latest
+          labels: org.opencontainers.image.source=https://github.com/heratok/ai-workspace
+          cache-from: type=gha
 
   # La landing (Astro) se despliega en Vercel: aquí se comprueba que compile y que sus dependencias
   # no tengan CVE HIGH/CRITICAL conocidas antes de llegar a main.

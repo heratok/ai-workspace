@@ -62,8 +62,13 @@ EOF
 }
 
 build_and_up() {
-  info "Construyendo imagen (la primera vez tarda varios minutos)..."
-  compose build --pull "$@"
+  local src; src="$(image_source)"
+  if [[ "$src" == ghcr ]]; then
+    image_pull
+  else
+    info "Construyendo imagen en este servidor (${src#build }; la primera vez tarda varios minutos)..."
+    compose build --pull "$@"
+  fi
   info "Levantando Tailscale..."
   compose up -d tailscale
   ts_wait_login
