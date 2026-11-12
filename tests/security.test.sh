@@ -64,6 +64,23 @@ t_image_scans_share_trivy_cache() {   # sin caché compartida, cada escaneo vuel
   (( n == 2 )) && ok || nok "los dos escaneos de la imagen deben montar el volumen trivy-cache (encontrados: $n)"
 }
 
+t_image_is_published_only_from_main() {   # los servidores descargan esta imagen: solo la que pasó build y solo desde main
+  local job; job="$(sed -n '/^  publish:/,/^  [a-z]*:$/p' "$CI" | sed '$d')"
+  [[ -n "$job" ]] && ok || { nok "falta el job 'publish'"; return 0; }
+  assert_has "después de build" "$job" "needs: build"
+  assert_has "solo main" "$job" "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')"
+  assert_has "permiso propio" "$job" "packages: write"
+  assert_has "tag del contexto" "$job" "bash scripts/image-tag.sh"
+  assert_has "ghcr" "$job" "ghcr.io/heratok/ai-workspace:\${{ steps.tag.outputs.tag }}"
+  assert_has "latest" "$job" "ghcr.io/heratok/ai-workspace:latest"
+  assert_has "solo amd64" "$job" "platforms: linux/amd64"
+  assert_has "reusa la caché del build" "$job" "cache-from: type=gha"
+  grep -qE 'uses: docker/login-action@[0-9a-f]{40}' "$CI" && ok || nok "docker/login-action debe ir fijado por SHA"
+  # packages: write en otro sitio daría permiso de escritura a pasos que corren código de los PR
+  [[ "$(grep -c 'packages: write' "$CI")" == 1 ]] && ok || nok "packages: write debe aparecer solo en el job publish"
+  sed -n '/^permissions:/,/^[a-z]/p' "$CI" | grep -q 'packages' && nok "el workflow no debe dar permisos de packages a todos los jobs" || ok
+}
+
 t_ci_step_names_are_valid_yaml() {      # "name: texto: otro" sin comillas rompe el YAML (actionlint: mapping values are not allowed)
   local bad; bad="$(grep -nE '^      - name: [^"'"'"'].*: ' "$CI" || true)"
   [[ -z "$bad" ]] && ok || nok "nombre de paso con ': ' sin comillas: $bad"
@@ -187,7 +204,7 @@ for t in t_ci_runs_on_a_schedule t_has_a_security_job t_scanners_are_pinned_not_
          t_ci_cancels_superseded_runs t_every_step_has_a_timeout t_build_uses_layer_cache \
          t_tool_images_pinned_by_digest t_landing_is_built_and_audited t_dependabot_watches_landing_npm \
          t_repo_scan_blocks_only_actionable_findings t_image_is_scanned_after_build \
-         t_image_scan_blocks_critical_and_reports_high t_image_scans_share_trivy_cache t_heavy_jobs_follow_changed_files t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_every_test_script_runs_in_ci t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
+         t_image_scan_blocks_critical_and_reports_high t_image_scans_share_trivy_cache t_heavy_jobs_follow_changed_files t_image_is_published_only_from_main t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_every_test_script_runs_in_ci t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
   run "$t"
 done
 
