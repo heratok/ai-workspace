@@ -46,6 +46,10 @@ EOF
   git -C "$R" config user.name t; git -C "$R" config user.email t@t; git -C "$R" config core.autocrlf false
   printf 'logs/\nbackups/\n.env\n' > "$R/.gitignore"
   git -C "$R" add -A; git -C "$R" commit -qm v1
+  # Clon real: origin/main existe (la imagen solo se descarga para versiones publicadas desde main)
+  git clone -q --bare "$R" "$SB/origin.git"
+  git -C "$R" remote add origin "$SB/origin.git"; git -C "$R" fetch -q origin
+  git -C "$R" branch -q --set-upstream-to=origin/main main
   unset XDG_DATA_HOME
   export HOME="$SB/home" FAKE_DOCKER_DIR="$SB/fake" PATH="$SB/bin:$PATH"
 }
@@ -120,6 +124,27 @@ t_local_edits_outside_the_context_keep_ghcr() {   # S8: solo cuenta lo que entra
   assert_eq "compose editado" ghcr "$(image_source)"
 }
 
+t_other_branch_or_fork_builds_locally() {   # solo se publica main de heratok/ai-workspace
+  load_setup
+  REPO_BRANCH=dev
+  assert_has "otra rama" "$(image_source)" "build"
+  load_setup
+  REPO_URL=https://github.com/otro/fork.git
+  assert_has "fork" "$(image_source)" "build"
+}
+
+t_local_commits_in_the_context_build_locally() {   # un commit local en config/ nunca se publica
+  load_setup
+  echo "# mío" >> "$R/config/zshrc"; git -C "$R" commit -qam local
+  assert_has "commit local" "$(image_source)" "build"
+}
+
+t_exported_build_args_build_locally() {   # compose da prioridad al entorno sobre el .env
+  load_setup
+  export INSTALL_OPENCODE=true
+  assert_has "variable exportada" "$(image_source)" "INSTALL_OPENCODE"
+}
+
 t_folder_without_git_builds_locally() {   # S8
   load_setup
   rm -rf "$R/.git"
@@ -158,9 +183,6 @@ t_build_and_up_still_builds_with_custom_config() {   # S3, comportamiento previo
 
 # ================================================================ upgrade y rollback
 mk_origin() {   # origin con v2 publicado o no; el servidor sigue en v1
-  git clone -q --bare "$R" "$SB/origin.git"
-  git -C "$R" remote add origin "$SB/origin.git"; git -C "$R" fetch -q origin
-  git -C "$R" branch -q --set-upstream-to=origin/main main
   V1="$(git -C "$R" rev-parse HEAD)"
   local w="$SB/work"; git clone -q "$SB/origin.git" "$w"
   git -C "$w" config user.name t; git -C "$w" config user.email t@t; git -C "$w" config core.autocrlf false
@@ -186,6 +208,14 @@ t_upgrade_proceeds_when_published() {   # S2
   assert_eq "reconstruye" "UPDATE " "$(cat "$SB/updates" 2>/dev/null)"
 }
 
+t_upgrade_with_invalid_source_changes_nothing() {   # un valor inválido no debe dejar pasar el chequeo previo
+  load_setup; mk_origin
+  env_set AIWS_IMAGE_SOURCE ghcrr
+  ( upgrade --yes ) >/dev/null 2>&1
+  assert_eq "sigue en v1" "$V1" "$(git -C "$R" rev-parse HEAD)"
+  assert_eq "no reconstruye" "" "$(cat "$SB/updates" 2>/dev/null)"
+}
+
 t_upgrade_with_custom_config_does_not_need_ghcr() {   # S3
   load_setup; mk_origin
   env_set INSTALL_OPENCODE true
@@ -194,7 +224,7 @@ t_upgrade_with_custom_config_does_not_need_ghcr() {   # S3
 }
 
 t_rollback_aborts_if_previous_image_not_published() {   # S4
-  load_setup; V1="$(git -C "$R" rev-parse HEAD)"; commit_v2
+  load_setup; V1="$(git -C "$R" rev-parse HEAD)"; commit_v2; git -C "$R" push -q origin main
   run_update() { echo "UPDATE $*" >> "$SB/updates"; }
   mkdir -p "$LOG_DIR"; echo "$V1" > "$LOG_DIR/.prev-version"
   ( rollback --yes ) >/dev/null 2>&1
@@ -203,6 +233,18 @@ t_rollback_aborts_if_previous_image_not_published() {   # S4
   publish "$TAG"
   ( rollback --yes ) >/dev/null 2>&1
   assert_eq "vuelve a v1" "$V1" "$(git -C "$R" rev-parse HEAD)"
+}
+
+t_rollback_to_a_version_without_ghcr_support_is_not_blocked() {   # esa versión construye con su propio setup.sh
+  load_setup; V1="$(git -C "$R" rev-parse HEAD)"
+  git -C "$R" rm -q lib/image.sh; git -C "$R" commit -qm "sin image.sh"
+  local old; old="$(git -C "$R" rev-parse HEAD)"
+  git -C "$R" checkout -q "$V1" -- lib/image.sh; git -C "$R" commit -qm "con image.sh"; git -C "$R" push -q origin main
+  run_update() { echo "UPDATE $*" >> "$SB/updates"; }
+  mkdir -p "$LOG_DIR"; echo "$old" > "$LOG_DIR/.prev-version"
+  ( rollback --yes ) >/dev/null 2>&1
+  assert_eq "vuelve atrás" "$old" "$(git -C "$R" rev-parse HEAD)"
+  assert_eq "reconstruye" "UPDATE " "$(cat "$SB/updates" 2>/dev/null)"
 }
 
 # ================================================================ clean
@@ -220,10 +262,12 @@ t_env_example_documents_image_source() {   # S6: los servidores existentes la re
 for t in t_defaults_use_ghcr t_env_example_documents_image_source t_explicit_defaults_and_quotes_still_use_ghcr t_custom_build_args_build_locally \
          t_non_amd64_builds_locally t_source_build_forces_local_build t_invalid_source_fails \
          t_local_edits_in_the_build_context_build_locally t_local_edits_outside_the_context_keep_ghcr t_folder_without_git_builds_locally \
+         t_other_branch_or_fork_builds_locally t_local_commits_in_the_context_build_locally t_exported_build_args_build_locally \
          t_build_and_up_pulls_and_tags_the_published_image t_build_and_up_fails_without_touching_the_container_if_not_published \
          t_build_and_up_still_builds_with_custom_config t_upgrade_aborts_before_touching_files_if_not_published \
-         t_upgrade_proceeds_when_published t_upgrade_with_custom_config_does_not_need_ghcr \
-         t_rollback_aborts_if_previous_image_not_published t_clean_removes_old_ghcr_tags_only; do
+         t_upgrade_proceeds_when_published t_upgrade_with_custom_config_does_not_need_ghcr t_upgrade_with_invalid_source_changes_nothing \
+         t_rollback_aborts_if_previous_image_not_published t_rollback_to_a_version_without_ghcr_support_is_not_blocked \
+         t_clean_removes_old_ghcr_tags_only; do
   run "$t"
 done
 

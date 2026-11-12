@@ -16,7 +16,7 @@ Rama: `feat/ghcr-image` · Entrega: `ask-on-risk` · Pruebas: `bash tests/<nombr
 - [x] T1 S1,S7 · inline · CI publica en GHCR + pruebas de ci.yml y de coherencia ARG/compose · commit: 6578ea1 (security 163/0, image-tag 11/0, pins 166/0; RED observado)
 - [x] T2 S2-S5,S8 · inline · `lib/image.sh` (decisión, descarga, limpieza) + integración en build_and_up/upgrade/clean + pruebas · commit: 3cda0ac (image 42/0 con RED 33 fallos antes; modules 148/0, maintenance 60/0, instances 332/0, commands 35/0, tools 105/0)
 - [x] T3 S6 · inline · documentación y env.example · commit: 0419ac7 (docs 65/0)
-- [ ] T4 · verificador independiente (Risk: ítems 2 y 5) · —
+- [x] T4 · verificador independiente (Risk: ítems 2 y 5) · 3 blockers (B1 corrida de main cancelada deja la imagen sin publicar; B2 rama/fork/commits locales intentaban descargar; B3 rollback a versión previa bloqueado) corregidos en una tanda; re-verificación: resueltos. image 50/0, security 169/0, instances 332/0
 
 ## Log
 - L1 (2026-11-12) Usuario: "si dale y si la imagen puede ser publica en ghcr ya el proyecto es publica y asi cada ai-worksapce puede bajar la ultima version y mantener su datos y proyecto correctos?"
@@ -24,3 +24,4 @@ Rama: `feat/ghcr-image` · Entrega: `ask-on-risk` · Pruebas: `bash tests/<nombr
 - L3 Decisiones: solo amd64 (multi-arquitectura con QEMU para 5 GB tardaría más de una hora); `AIWS_IMAGE_SOURCE=auto|build` (por defecto `auto`); la visibilidad pública del paquete se cambia una vez a mano en GitHub (la API no lo permite para paquetes de usuario).
 - L4 Rediseño: con el filtro de rutas del #18 (ya en main) el job build no corre en commits solo de docs, así que una etiqueta por SHA de commit dejaría servidores sin imagen. La etiqueta pasa a ser un hash del contexto de build (`ctx-<hash>`), calculado por `scripts/image-tag.sh` en el CI y en el servidor.
 - L5 RDD apagado (global off): sin review nativo. ShellCheck no corrió en local (Docker Desktop apagado): lo valida el job lint.
+- L6 Correcciones del verificador: changes fuerza build en main si falta la imagen del contexto en GHCR; publish needs [build, security] y acepta workflow_dispatch en main; image_source construye local para otra rama\/fork o commits locales; rollback no se bloquea hacia versiones sin lib\/image.sh; variables exportadas cuentan como configuración propia. Advisory pendiente A5: publish reconstruye desde la caché gha (si se desaloja, publica capas no escaneadas en ese job).

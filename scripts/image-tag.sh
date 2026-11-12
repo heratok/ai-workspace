@@ -18,7 +18,7 @@ if [[ "${1:-}" == --paths ]]; then printf '%s\n' "${CONTEXT_PATHS[@]}"; exit 0; 
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 rev="${1:-HEAD}"
-tree="$(git ls-tree -r "$rev" -- "${CONTEXT_PATHS[@]}")"
+tree="$(git -c safe.directory="$PWD" ls-tree -r "$rev" -- "${CONTEXT_PATHS[@]}")"
 [[ -n "$tree" ]] || { echo "image-tag: $rev no tiene contexto de build (${CONTEXT_PATHS[*]})" >&2; exit 1; }
 hash="$(git hash-object --stdin <<< "$tree")"
 echo "ctx-${hash:0:12}"

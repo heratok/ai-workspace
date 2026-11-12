@@ -52,7 +52,9 @@ t_image_scan_blocks_critical_and_reports_high() {
 
 t_heavy_jobs_follow_changed_files() {   # build y landing se saltan si el cambio no los toca; lint y security corren siempre
   local body; body="$(<"$CI")"
-  assert_has "job changes" "$body" "run: bash scripts/ci-changes.sh"
+  assert_has "job changes" "$body" "bash scripts/ci-changes.sh"
+  # Una corrida de main cancelada o fallida no debe dejar sin publicar la imagen de su contexto
+  assert_has "main construye si falta la imagen" "$body" 'docker manifest inspect "ghcr.io/heratok/ai-workspace:$tag"'
   assert_has "build filtrado" "$body" "if: needs.changes.outputs.image == 'true'"
   assert_has "landing filtrado" "$body" "if: needs.changes.outputs.landing == 'true'"
   grep -qE '^  changes:' "$CI" && ok || nok "falta el job 'changes'"
@@ -67,8 +69,8 @@ t_image_scans_share_trivy_cache() {   # sin caché compartida, cada escaneo vuel
 t_image_is_published_only_from_main() {   # los servidores descargan esta imagen: solo la que pasó build y solo desde main
   local job; job="$(sed -n '/^  publish:/,/^  [a-z]*:$/p' "$CI" | sed '$d')"
   [[ -n "$job" ]] && ok || { nok "falta el job 'publish'"; return 0; }
-  assert_has "después de build" "$job" "needs: build"
-  assert_has "solo main" "$job" "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')"
+  assert_has "después de build y security" "$job" "needs: [build, security]"
+  assert_has "solo main, nunca un PR" "$job" "if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'"
   assert_has "permiso propio" "$job" "packages: write"
   assert_has "tag del contexto" "$job" "bash scripts/image-tag.sh"
   assert_has "ghcr" "$job" "ghcr.io/heratok/ai-workspace:\${{ steps.tag.outputs.tag }}"

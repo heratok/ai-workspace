@@ -10,20 +10,22 @@
 
 IMAGE_REPO="${AIWS_IMAGE_REPO:-ghcr.io/heratok/ai-workspace}"
 IMAGE_TAG_SCRIPT="$SCRIPT_DIR/scripts/image-tag.sh"
+IMAGE_PUBLISHED_FROM="https://github.com/heratok/ai-workspace.git main"   # lo único que publica el CI
 
 host_arch() { uname -m; }
 
 # image_tag [commit]: etiqueta en GHCR de la imagen de ese commit (por defecto, HEAD)
 image_tag() { bash "$IMAGE_TAG_SCRIPT" "$@"; }
 
-# Variables de build del .env distintas del valor por defecto del compose (una por línea).
-# Vacía equivale al defecto, igual que ${VAR:-defecto} en compose; las comillas no cuentan.
+# Variables de build distintas del valor por defecto del compose (una por línea), mirando lo mismo que compose:
+# primero el entorno del proceso y luego el .env. Vacía equivale al defecto, igual que ${VAR:-defecto};
+# las comillas no cuentan.
 image_custom_args() {
   local line key def val
   while IFS= read -r line; do
     [[ "$line" =~ ^[[:space:]]+([A-Z0-9_]+):\ \$\{([A-Z0-9_]+):-([^}]*)\} ]] || continue
     key="${BASH_REMATCH[1]}"; def="${BASH_REMATCH[3]}"
-    val="$(env_get "$key")"
+    val="${!key:-}"; [[ -n "$val" ]] || val="$(env_get "$key")"
     val="${val#\"}"; val="${val%\"}"; val="${val#\'}"; val="${val%\'}"
     [[ -z "$val" || "$val" == "$def" ]] || echo "$key"
   done < <(sed -n '/^  ai-workspace:/,/^    image:/p' "$SCRIPT_DIR/docker-compose.yml")
@@ -39,7 +41,10 @@ image_source() {
   esac
   local arch; arch="$(host_arch)"
   [[ "$arch" == x86_64 ]] || { echo "build arquitectura $arch (GHCR solo publica amd64)"; return 0; }
+  [[ "$REPO_URL $REPO_BRANCH" == "$IMAGE_PUBLISHED_FROM" ]] || { echo "build repo o rama distintos de heratok/ai-workspace main"; return 0; }
   [[ -d "$SCRIPT_DIR/.git" ]] && image_tag >/dev/null 2>&1 || { echo "build carpeta sin historial de git"; return 0; }
+  # Un commit local (que no está en origin/main) nunca se publica
+  g merge-base --is-ancestor HEAD "origin/$REPO_BRANCH" 2>/dev/null || { echo "build sin origin/$REPO_BRANCH o con commits locales que no están ahí"; return 0; }
   local custom; custom="$(image_custom_args | tr '\n' ' ')"
   [[ -z "$custom" ]] || { echo "build configuración propia en .env: ${custom% }"; return 0; }
   local -a paths; mapfile -t paths < <(image_tag --paths)
@@ -48,9 +53,12 @@ image_source() {
 }
 
 # Si la imagen sale de GHCR, la de <commit> tiene que estar publicada antes de cambiar nada.
-# Sin publicar: el CI de esa versión no terminó o falló.
+# Sin publicar: el CI de esa versión no terminó o falló. Una versión sin lib/image.sh no se comprueba:
+# la aplica su propio setup.sh (run_update), que construye en el servidor.
 image_check_published() {
-  [[ "$(image_source)" == ghcr ]] || return 0
+  local src; src="$(image_source)" || return 1
+  [[ "$src" == ghcr ]] || return 0
+  g cat-file -e "$1:lib/image.sh" 2>/dev/null || return 0
   local tag; tag="$(image_tag "$1" 2>/dev/null)" || return 0
   docker manifest inspect "$IMAGE_REPO:$tag" >/dev/null 2>&1 && return 0
   warn "La imagen de esa versión ($IMAGE_REPO:$tag) todavía no está publicada: el CI no terminó o falló."

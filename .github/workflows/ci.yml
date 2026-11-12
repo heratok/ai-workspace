@@ -167,7 +167,16 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: bash scripts/ci-changes.sh "$EVENT" "$BASE" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+        # En main, si la imagen de este contexto no está en GHCR (la corrida que la traía se canceló o falló),
+        # se construye igual aunque este commit no toque la imagen: si no, los servidores nunca la tendrían.
+        run: |
+          out="$(bash scripts/ci-changes.sh "$EVENT" "$BASE" "$GITHUB_SHA")"
+          tag="$(bash scripts/image-tag.sh)"
+          if [[ "$GITHUB_REF" == refs/heads/main && "$out" == *image=false* ]] \
+             && ! docker manifest inspect "ghcr.io/heratok/ai-workspace:$tag" >/dev/null 2>&1; then
+            out="${out/image=false/image=true}"
+          fi
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
 
   build:
     needs: [lint, changes]
@@ -229,13 +238,13 @@ jobs:
             ws-doctor --guide | grep -q "Guía del entorno"'
 
   # Publica en GHCR (paquete público) la imagen que acaba de pasar build, para que los servidores con la
-  # configuración por defecto la descarguen en vez de construirla. Solo desde main (push y corrida del lunes);
+  # configuración por defecto la descarguen en vez de construirla. Solo desde main (push, corrida del lunes o manual);
   # los PR nunca publican. Etiqueta: ctx-<hash del contexto de build> (scripts/image-tag.sh, la misma que calcula
   # setup.sh) y latest. Si build se saltó (cambio sin efecto en la imagen), la etiqueta ya existe y no se publica.
   # Reconstruye desde la caché de capas que acaba de guardar build, así que publica las mismas capas probadas.
   publish:
-    needs: build
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
+    needs: [build, security]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -249,7 +258,9 @@ jobs:
       - name: Etiqueta de la imagen
         id: tag
         timeout-minutes: 5
-        run: echo "tag=$(bash scripts/image-tag.sh)" | tee -a "$GITHUB_OUTPUT"
+        run: |
+          tag="$(bash scripts/image-tag.sh)"
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         timeout-minutes: 5
         with:
