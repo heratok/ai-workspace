@@ -84,6 +84,9 @@ jobs:
       - name: Pruebas de add-key y components
         timeout-minutes: 5
         run: bash tests/commands.test.sh
+      - name: Pruebas del filtro de jobs por archivos cambiados
+        timeout-minutes: 5
+        run: bash tests/ci-changes.test.sh
       - name: docker compose config
         timeout-minutes: 5
         run: |
@@ -138,8 +141,31 @@ jobs:
         timeout-minutes: 5
         run: bash tests/security.test.sh
 
+  # Decide qué jobs pesados hacen falta según los archivos cambiados (scripts/ci-changes.sh).
+  # lint y security corren siempre; build y landing solo si el cambio los toca. El lunes, workflow_dispatch
+  # o sin una base confiable para comparar, corre todo.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.diff.outputs.image }}
+      landing: ${{ steps.diff.outputs.landing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+      - name: Archivos cambiados
+        id: diff
+        timeout-minutes: 5
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/ci-changes.sh "$EVENT" "$BASE" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
   build:
-    needs: lint
+    needs: [lint, changes]
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -198,6 +224,8 @@ jobs:
   # La landing (Astro) se despliega en Vercel: aquí se comprueba que compile y que sus dependencias
   # no tengan CVE HIGH/CRITICAL conocidas antes de llegar a main.
   landing:
+    needs: changes
+    if: needs.changes.outputs.landing == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
