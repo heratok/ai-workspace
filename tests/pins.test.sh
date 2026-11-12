@@ -22,7 +22,7 @@ source "$ROOT/tests/helpers/asserts.sh"
 # ARG de Dockerfile -> valor por defecto
 default_of() { sed -n -E "s/^ARG $1=\"?([^\" ]*)\"?.*/\1/p" "$DOCKERFILE" | head -n1; }
 
-PIN_ARGS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PLAYWRIGHT_VERSION PLAYWRIGHT_CLI_VERSION PLAYWRIGHT_MCP_VERSION UV_VERSION MISE_VERSION HERDR_VERSION GENTLE_AI_VERSION DOPPLER_VERSION)
+PIN_ARGS=(CLAUDE_CODE_VERSION PI_VERSION OPENCODE_VERSION PNPM_VERSION PLAYWRIGHT_VERSION PLAYWRIGHT_CLI_VERSION PLAYWRIGHT_MCP_VERSION UV_VERSION MISE_VERSION HERDR_VERSION GENTLE_AI_VERSION DOPPLER_VERSION)
 SHA_ARGS=(HERDR_SHA256_AMD64 HERDR_SHA256_ARM64)
 ALL_PINS=("${PIN_ARGS[@]}" "${SHA_ARGS[@]}")
 
@@ -39,6 +39,7 @@ t_npm_packages_are_installed_with_explicit_versions() {
   assert_has "claude"   "$body" '@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}'
   assert_has "pi"       "$body" '@mariozechner/pi-coding-agent@${PI_VERSION:-latest}'
   assert_has "opencode" "$body" 'opencode-ai@${OPENCODE_VERSION:-latest}'
+  assert_has "pnpm"     "$body" 'pnpm@${PNPM_VERSION:-latest}'
   assert_has "playwright" "$body" 'playwright@${PLAYWRIGHT_VERSION:-latest}'
   assert_has "pw cli"   "$body" '@playwright/cli@${PLAYWRIGHT_CLI_VERSION:-latest}'
   assert_has "pw mcp"   "$body" '@playwright/mcp@${PLAYWRIGHT_MCP_VERSION:-latest}'
@@ -124,7 +125,7 @@ t_agy_always_installs_the_latest() {   # decisión: agy no se fija (Google no li
 t_image_label_lists_every_pinned_tool() {   # `./setup.sh tools` lee esta etiqueta para mostrar lo que hay REALMENTE en la imagen
   local body id; body="$(<"$DOCKERFILE")"
   assert_has "etiqueta" "$body" 'LABEL org.ai-workspace.versions='
-  for id in claude-code pi opencode playwright playwright-cli playwright-mcp uv mise herdr gentle-ai doppler; do
+  for id in claude-code pi opencode pnpm playwright playwright-cli playwright-mcp uv mise herdr gentle-ai doppler; do
     grep -qE "org\.ai-workspace\.versions=.*[\",]${id}=\\$\{[A-Z_]+_VERSION\}" <<< "$body" && ok || nok "la etiqueta de versiones no incluye $id"
   done
 }

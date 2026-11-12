@@ -9,7 +9,7 @@
 #   scripts/update-pins.sh [--target repo|env] latest [herramienta|all]     Fija la última estable, sin preguntar
 #   scripts/update-pins.sh --target env reset                     Quita del .env todas las versiones fijadas
 #
-# Herramientas: claude-code pi opencode playwright playwright-cli playwright-mcp (npm), uv mise tailscale
+# Herramientas: claude-code pi opencode pnpm playwright playwright-cli playwright-mcp (npm), uv mise tailscale
 # herdr gentle-ai doppler (releases de GitHub). agy NO se fija: siempre instala la última al construir.
 #
 # --target repo (por defecto, para mantenedores): reescribe Dockerfile, docker-compose.yml y env.example.
@@ -27,7 +27,7 @@ ROOT="${PINS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${PINS_ENV:-$ROOT/.env}"
 TARGET=repo
 DEFAULT_COUNT=5
-TOOLS=(claude-code pi opencode playwright playwright-cli playwright-mcp uv mise tailscale herdr gentle-ai doppler)
+TOOLS=(claude-code pi opencode pnpm playwright playwright-cli playwright-mcp uv mise tailscale herdr gentle-ai doppler)
 HERDR_SHA_KEYS=(HERDR_SHA256_AMD64 HERDR_SHA256_ARM64)
 
 die()  { echo "[error] $*" >&2; exit 1; }
@@ -41,6 +41,7 @@ tool_spec() {
     claude-code)    echo "npm|Claude Code|CLAUDE_CODE_VERSION|@anthropic-ai/claude-code|||1|INSTALL_CLAUDE" ;;
     pi)             echo "npm|Pi|PI_VERSION|@mariozechner/pi-coding-agent|||1|INSTALL_PI" ;;
     opencode)       echo "npm|opencode|OPENCODE_VERSION|opencode-ai|||1|INSTALL_OPENCODE" ;;
+    pnpm)           echo "npm|pnpm|PNPM_VERSION|pnpm|||1|" ;;
     playwright)     echo "npm|Playwright|PLAYWRIGHT_VERSION|playwright|||1|INSTALL_PLAYWRIGHT" ;;
     playwright-cli) echo "npm|Playwright CLI|PLAYWRIGHT_CLI_VERSION|@playwright/cli|||1|INSTALL_PLAYWRIGHT" ;;
     playwright-mcp) echo "npm|Playwright MCP|PLAYWRIGHT_MCP_VERSION|@playwright/mcp|||1|INSTALL_PLAYWRIGHT" ;;

@@ -63,6 +63,7 @@ EOF
   npm_fx @anthropic-ai/claude-code 2.1.310 2.1.296 2.1.300 2.2.0-beta.1
   npm_fx @mariozechner/pi-coding-agent 0.73.1 0.73.0
   npm_fx opencode-ai 1.19.0 1.18.0
+  npm_fx pnpm 12.18.0 12.17.0
   npm_fx playwright 1.65.0 1.64.0
   npm_fx @playwright/cli 0.1.22 0.1.21
   npm_fx @playwright/mcp 0.0.83 0.0.82

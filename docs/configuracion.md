@@ -116,7 +116,7 @@ Para que dos builds del mismo commit den la misma imagen, las herramientas lleva
 
 | Variable | Qué fija |
 |----------|----------|
-| `CLAUDE_CODE_VERSION`, `PI_VERSION`, `OPENCODE_VERSION` | CLIs de npm |
+| `CLAUDE_CODE_VERSION`, `PI_VERSION`, `OPENCODE_VERSION`, `PNPM_VERSION` | CLIs de npm |
 | `PLAYWRIGHT_VERSION`, `PLAYWRIGHT_CLI_VERSION`, `PLAYWRIGHT_MCP_VERSION` | Playwright y sus CLIs |
 | `UV_VERSION`, `MISE_VERSION`, `TS_IMAGE_TAG` | `uv`, `mise` y la imagen de Tailscale |
 | `HERDR_VERSION`, `HERDR_SHA256_AMD64`, `HERDR_SHA256_ARM64` | Binario de Herdr y el SHA-256 con el que se verifica |
