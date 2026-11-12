@@ -50,6 +50,11 @@ t_image_scan_blocks_critical_and_reports_high() {
   grep -qE 'image .*--severity HIGH .*--exit-code 0 .*ai-workspace:ci' "$CI" && ok || nok "los HIGH de la imagen deben informarse sin bloquear"
 }
 
+t_image_scans_share_trivy_cache() {   # sin caché compartida, cada escaneo vuelve a bajar la base de vulnerabilidades (~1 min)
+  local n; n="$(grep -cE 'trivy-cache:/root/\.cache/trivy .*image .*ai-workspace:ci' "$CI" || true)"
+  (( n == 2 )) && ok || nok "los dos escaneos de la imagen deben montar el volumen trivy-cache (encontrados: $n)"
+}
+
 t_ci_step_names_are_valid_yaml() {      # "name: texto: otro" sin comillas rompe el YAML (actionlint: mapping values are not allowed)
   local bad; bad="$(grep -nE '^      - name: [^"'"'"'].*: ' "$CI" || true)"
   [[ -z "$bad" ]] && ok || nok "nombre de paso con ': ' sin comillas: $bad"
@@ -173,7 +178,7 @@ for t in t_ci_runs_on_a_schedule t_has_a_security_job t_scanners_are_pinned_not_
          t_ci_cancels_superseded_runs t_every_step_has_a_timeout t_build_uses_layer_cache \
          t_tool_images_pinned_by_digest t_landing_is_built_and_audited t_dependabot_watches_landing_npm \
          t_repo_scan_blocks_only_actionable_findings t_image_is_scanned_after_build \
-         t_image_scan_blocks_critical_and_reports_high t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_every_test_script_runs_in_ci t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
+         t_image_scan_blocks_critical_and_reports_high t_image_scans_share_trivy_cache t_ci_step_names_are_valid_yaml t_every_test_script_is_shellchecked t_every_test_script_runs_in_ci t_hadolint_config_documents_every_ignore t_trivyignore_documents_every_ignore; do
   run "$t"
 done
 
