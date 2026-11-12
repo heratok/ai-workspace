@@ -186,11 +186,12 @@ jobs:
       - name: Escanear la imagen (CRITICAL con corrección disponible; bloquea)
         timeout-minutes: 15
         # Baseline medido sobre la imagen completa: 0 CRITICAL con corrección.
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --quiet --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 ai-workspace:ci
+        # El volumen trivy-cache guarda la base de vulnerabilidades y el análisis de capas: el segundo escaneo no los repite.
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --quiet --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 ai-workspace:ci
       - name: Informe de CVE HIGH de la imagen (no bloquea)
         timeout-minutes: 15
         # El baseline son ~40 HIGH en binarios Go de terceros (gh, gentle-ai) que no se pueden corregir aquí.
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --quiet --scanners vuln --severity HIGH --ignore-unfixed --exit-code 0 ai-workspace:ci
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --quiet --scanners vuln --severity HIGH --ignore-unfixed --exit-code 0 ai-workspace:ci
       - name: Entrypoint y sshd en un contenedor real (enlaces simbólicos del usuario y reenvíos)
         timeout-minutes: 15
         env:
