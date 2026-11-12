@@ -13,9 +13,9 @@ Rama: `feat/ghcr-image` · Entrega: `ask-on-risk` · Pruebas: `bash tests/<nombr
 - **S8** (derivado de L4) carpeta sin git o con cambios locales sin commit en el contexto de build (`Dockerfile`, `.dockerignore`, `entrypoint.sh`, `config/`): construye local, para no perder esas personalizaciones.
 
 ## Tasks
-- [ ] T1 S1,S7,S8 · inline · CI publica en GHCR + pruebas de ci.yml y de coherencia ARG/compose · commit: —
-- [ ] T2 S2-S5 · inline · `lib/image.sh` (decisión, descarga, limpieza) + integración en build_and_up/upgrade/clean + pruebas · commit: —
-- [ ] T3 S6 · inline · documentación y env.example · commit: —
+- [x] T1 S1,S7 · inline · CI publica en GHCR + pruebas de ci.yml y de coherencia ARG/compose · commit: 6578ea1 (security 163/0, image-tag 11/0, pins 166/0; RED observado)
+- [x] T2 S2-S5,S8 · inline · `lib/image.sh` (decisión, descarga, limpieza) + integración en build_and_up/upgrade/clean + pruebas · commit: 3cda0ac (image 42/0 con RED 33 fallos antes; modules 148/0, maintenance 60/0, instances 332/0, commands 35/0, tools 105/0)
+- [x] T3 S6 · inline · documentación y env.example · commit: 0419ac7 (docs 65/0)
 - [ ] T4 · verificador independiente (Risk: ítems 2 y 5) · —
 
 ## Log
@@ -23,3 +23,4 @@ Rama: `feat/ghcr-image` · Entrega: `ask-on-risk` · Pruebas: `bash tests/<nombr
 - L2 Evidencia: `gh repo view` → heratok/ai-workspace PUBLIC. Mapa del explorador: único `compose build` en `lib/lifecycle.sh:66`; rollback lee `logs/.prev-version` y llama a `update`; `clean` filtra por la etiqueta `org.ai-workspace.instance`, que una imagen descargada no tiene; no hay ayudante que compare `.env` con los valores por defecto.
 - L3 Decisiones: solo amd64 (multi-arquitectura con QEMU para 5 GB tardaría más de una hora); `AIWS_IMAGE_SOURCE=auto|build` (por defecto `auto`); la visibilidad pública del paquete se cambia una vez a mano en GitHub (la API no lo permite para paquetes de usuario).
 - L4 Rediseño: con el filtro de rutas del #18 (ya en main) el job build no corre en commits solo de docs, así que una etiqueta por SHA de commit dejaría servidores sin imagen. La etiqueta pasa a ser un hash del contexto de build (`ctx-<hash>`), calculado por `scripts/image-tag.sh` en el CI y en el servidor.
+- L5 RDD apagado (global off): sin review nativo. ShellCheck no corrió en local (Docker Desktop apagado): lo valida el job lint.
