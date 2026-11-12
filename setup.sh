@@ -70,6 +70,8 @@ source "$SCRIPT_DIR/lib/backup.sh"
 source "$SCRIPT_DIR/lib/uninstall.sh"
 # shellcheck source=lib/tools.sh
 source "$SCRIPT_DIR/lib/tools.sh"
+# shellcheck source=lib/image.sh
+source "$SCRIPT_DIR/lib/image.sh"
 
 # Muestra el encabezado de este archivo (hasta la línea de cierre "# ====")
 usage() { awk 'NR >= 3 { if ($0 ~ /^# =+$/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }

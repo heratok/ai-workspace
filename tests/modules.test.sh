@@ -18,7 +18,7 @@ trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=tests/helpers/asserts.sh
 source "$ROOT/tests/helpers/asserts.sh"
 
-MODULES=(common instances config lifecycle background resources components maintenance backup uninstall tools)
+MODULES=(common instances config lifecycle background resources components maintenance backup uninstall tools image)
 
 # Funciones que existían en el setup.sh monolítico (ninguna puede perderse ni duplicarse al mover)
 BASELINE_FUNCTIONS="

@@ -90,6 +90,9 @@ jobs:
       - name: Pruebas de la etiqueta de la imagen (hash del contexto de build)
         timeout-minutes: 5
         run: bash tests/image-tag.test.sh
+      - name: Pruebas del origen de la imagen (GHCR o build en el servidor)
+        timeout-minutes: 10
+        run: bash tests/image.test.sh
       - name: docker compose config
         timeout-minutes: 5
         run: |
