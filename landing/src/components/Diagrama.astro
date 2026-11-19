@@ -4,7 +4,7 @@ const nodos = {
   pc: { t: 'Tu PC', s: 'cliente en la tailnet', d: 'Conectado a la misma tailnet. Entra por SSH o mosh a ai-workspace (MagicDNS) o a la IP 100.x. Los dev servers se abren en :3000 y :5173.', tag: 'origen' },
   internet: { t: 'Internet público', s: 'sin camino de entrada', d: 'El compose no declara ports:, así que Docker no abre nada en el servidor. No hay puerto que escanear: el único tráfico que entra es WireGuard cifrado hacia el sidecar.', tag: 'bloqueado' },
   ts: { t: 'ai-workspace-ts', s: 'sidecar Tailscale', d: 'La única puerta. Es el único contenedor con NET_ADMIN y /dev/net/tun; modo kernel (TCP y UDP completos para mosh). Tiene healthcheck en 127.0.0.1:9002 y su identidad persiste en ai_ts_state.', tag: 'red' },
-  ws: { t: 'ai-workspace', s: 'entorno de desarrollo', d: 'Debian 12 con usuario ai sin root. Usa network_mode: service:tailscale: comparte la red del sidecar, así que no tiene puertos ni hostname propios. sshd en :22, mosh en 60000-60010/udp y bases locales con devdb.', tag: 'app' },
+  ws: { t: 'ai-workspace', s: 'entorno de desarrollo', d: 'Debian 13 con usuario ai sin root. Usa network_mode: service:tailscale: comparte la red del sidecar, así que no tiene puertos ni hostname propios. sshd en :22, mosh en 60000-60010/udp y bases locales con devdb.', tag: 'app' },
   mssql: { t: 'ai-workspace-mssql', s: 'SQL Server opcional', d: 'Solo con COMPOSE_PROFILES=mssql. Va aparte porque SQL Server no corre sin root. El workspace lo ve como mssql:1433 por la red de compose; no llega a la tailnet.', tag: 'opcional' },
   vol: { t: 'Volúmenes', s: 'lo que persiste', d: 'ai_home (config y bases devdb), ai_workspace (proyectos), ai_ssh_host_keys (identidad SSH), ai_ts_state (nodo Tailscale). Sobreviven a update y a uninstall.', tag: 'datos' },
 };
@@ -63,7 +63,7 @@ const nodos = {
       <g class="nd" data-k="ws" tabindex="0" role="button" aria-label="Workspace">
         <rect x="480" y="86" width="234" height="186" rx="12" class="nodo ws"/>
         <text x="597" y="114" class="t">ai-workspace</text>
-        <text x="597" y="132" class="s">Debian 12 · usuario ai · sin root</text>
+        <text x="597" y="132" class="s">Debian 13 · usuario ai · sin root</text>
         <rect x="498" y="146" width="198" height="40" rx="8" class="app"/>
         <text x="597" y="164" class="t ac">sshd :22 · mosh udp</text>
         <text x="597" y="179" class="s">solo clave pública</text>

@@ -28,11 +28,11 @@ on the shared test VPS without asking (disk incident 2026-10-13: 73% -> 98%).
 Strict TDD: add/adjust static tests first (e.g. no remaining `bookworm`, repos match the base).
 
 ## Tasks
-- [ ] B1 Tests (RED): no `bookworm`/`debian/12`/`Debian 12` left outside this doc; repos match base
+- [x] B1 Tests (RED): no `bookworm`/`debian/12`/`Debian 12` left outside this doc; repos match base
 - [ ] B2 Dockerfile + packages.apt on trixie; fix what the build reports
-- [ ] B3 Update texts (AGENTS.md, landing, backup.sh fallback, zshrc)
+- [x] B3 Update texts (AGENTS.md, landing, backup.sh fallback, zshrc)
 - [ ] B4 Re-measure security baseline and capability set; update .trivyignore/.hadolint.yaml if needed
-- [ ] B5 Remove the dependabot `ignore` for debian major (or bump the pin consciously)
+- [x] B5 Remove the dependabot `ignore` for debian major (or bump the pin consciously)
 
 ## Progress / Next
-Not started. Trigger: when planned (suggested within a few months).
+2026-11-19: B1 RED (pins.test.sh t_base_image_and_apt_repos_are_debian_13: 4 fallos) -> GREEN (170/0). Verificado contra repos reales: trixie-pgdg y packages.microsoft.com/debian/13 (mssql-tools18, msodbcsql18) publicados; todos los paquetes de config/packages.apt existen en trixie; Playwright 1.64 soporta debian13-x64/arm64; fzf 0.60 mantiene /usr/share/doc/fzf/examples/*.zsh. B5: se mantiene el ignore de saltos mayores (13 -> 14 también debe ser deliberado), comentario generalizado. Suite en Linux: todo verde salvo docs.test.sh (15 fallos que ya ocurren en main en ese entorno). B2/B4: build local en curso; CI del PR.

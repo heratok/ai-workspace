@@ -18,7 +18,7 @@ backup() {   # backup [--no-rotate]: deja la ruta del respaldo en LAST_BACKUP (v
   (( ${#mounts[@]} )) || { warn "No hay volúmenes de datos que respaldar."; return 0; }
   mkdir -p "$dest"; chmod 700 "$dest"
   file="$AIWS_NAME-$(date +%Y%m%d-%H%M%S).tar.gz"
-  img="$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)"
+  img="$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:13-slim)"
   # Si PostgreSQL local está corriendo, se detiene para un respaldo consistente
   docker exec -u "$WS_USER" "$CONTAINER" devdb stop all >/dev/null 2>&1 || true
   info "Respaldando home y proyectos -> backups/$file"
@@ -151,7 +151,7 @@ extract_backup() {   # extract_backup ARCHIVO VOL...: vacía esos volúmenes y e
   local file="$1" v; shift
   local -a mounts=(); for v in "$@"; do mounts+=(-v "$v:/v/$v"); done
   docker run --rm "${mounts[@]}" -v "$(dirname "$file"):/b:ro" --entrypoint sh \
-    "$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:12-slim)" \
+    "$(docker image inspect "$IMAGE" >/dev/null 2>&1 && echo "$IMAGE" || echo debian:13-slim)" \
     -c 'f="$1"; shift; for v in "$@"; do find "/v/$v" -mindepth 1 -delete; done; tar xzf "/b/$f" -C /v' \
     _ "$(basename "$file")" "$@"
 }

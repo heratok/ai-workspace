@@ -1,6 +1,6 @@
 # Guía del entorno (léela antes de instalar o diagnosticar)
 
-Estás en un contenedor Linux (Debian 12) como el usuario `ai`. No tienes root ni `sudo`, y `apt` no sirve para instalar. Todo se instala en tu home o en `/workspace`.
+Estás en un contenedor Linux (Debian 13) como el usuario `ai`. No tienes root ni `sudo`, y `apt` no sirve para instalar. Todo se instala en tu home o en `/workspace`.
 
 ## Necesito X: comando
 

@@ -166,16 +166,26 @@ t_ci_checks_that_dotenv_pins_reach_the_build() {
   grep -qE 'tailscale/tailscale:v1[\]?[.]100[\]?[.]0' "$ci" && ok || nok "ci.yml debe comprobar que TS_IMAGE_TAG del .env llega a la imagen de Tailscale"
 }
 
-t_dependabot_ignores_debian_major_bumps() {   # debian 12 -> 13 rompe el build (repos bookworm-pgdg/Microsoft): migración planificada aparte
+t_dependabot_ignores_debian_major_bumps() {   # un salto mayor de debian cambia repos y paquetes: se migra a propósito
   local blk; blk="$(awk '/package-ecosystem: docker$/ {on=1; next} /package-ecosystem:/ {on=0} on' "$DEPENDABOT")"
   grep -q 'dependency-name: debian' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar debian"
   grep -q 'version-update:semver-major' <<< "$blk" && ok || nok "dependabot (docker) debe ignorar solo los saltos de versión mayor de debian"
   grep -q '^[[:space:]]*#.*debian-13-migration' "$DEPENDABOT" && ok || nok "la regla debe apuntar a odd/tasks/debian-13-migration.md en un comentario"
 }
 
+t_base_image_and_apt_repos_are_debian_13() {   # trixie: los repos externos deben apuntar a la misma versión que la base
+  grep -qx 'FROM debian:13-slim' "$DOCKERFILE" && ok || nok "la imagen base debe ser debian:13-slim"
+  grep -q 'apt.postgresql.org/pub/repos/apt trixie-pgdg main' "$DOCKERFILE" && ok || nok "PGDG debe usar trixie-pgdg"
+  grep -q 'packages.microsoft.com/debian/13/prod trixie main' "$DOCKERFILE" && ok || nok "Microsoft debe usar debian/13/prod trixie"
+  local left
+  left="$(cd "$ROOT" && git ls-files | grep -vE '^(odd/|tests/pins[.]test[.]sh$)' \
+          | xargs grep -nIE 'bookworm|debian/12|[Dd]ebian 12|debian:12|pgdg12' 2>/dev/null)"
+  [[ -z "$left" ]] && ok || nok "quedan referencias a Debian 12: $left"
+}
+
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
          t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile t_every_build_arg_default_matches_dockerfile \
-         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out t_ci_checks_that_dotenv_pins_reach_the_build; do
+         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_base_image_and_apt_repos_are_debian_13 t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out t_ci_checks_that_dotenv_pins_reach_the_build; do
   run "$t"
 done
 
