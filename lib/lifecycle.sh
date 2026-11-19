@@ -61,9 +61,18 @@ EOF
   die "Tailscale no se conectó. Revisa la auth key o vuelve a ejecutar install."
 }
 
+# build_and_up [--install] [args de compose build]
+# --install: la imagen de GHCR se descarga mientras se hace el login de Tailscale; si no se puede descargar,
+# se construye aquí (no hay contenedor en marcha que proteger), y la auth key se borra antes de crear el workspace.
 build_and_up() {
-  local src; src="$(image_source)"
-  if [[ "$src" == ghcr ]]; then
+  local install=""; [[ "${1:-}" == --install ]] && { install=1; shift; }
+  local src pull_pid="" pull_log=""; src="$(image_source)"
+  if [[ "$src" == ghcr && -n "$install" ]]; then
+    pull_log="$(mktemp)"
+    info "Descargando la imagen publicada por el CI en segundo plano (varios GB) mientras se conecta Tailscale..."
+    ( trap - ERR; image_pull --try ) > "$pull_log" 2>&1 &
+    pull_pid=$!
+  elif [[ "$src" == ghcr ]]; then
     image_pull
   else
     info "Construyendo imagen en este servidor (${src#build }; la primera vez tarda varios minutos)..."
@@ -72,6 +81,18 @@ build_and_up() {
   info "Levantando Tailscale..."
   compose up -d tailscale
   ts_wait_login
+  [[ -z "$install" ]] || forget_authkey
+  if [[ -n "$pull_pid" ]]; then
+    info "Esperando a que termine la descarga de la imagen..."
+    if wait "$pull_pid"; then
+      info "Imagen descargada."
+    else
+      tail -n 5 "$pull_log" >&2 || true
+      warn "No se pudo descargar la imagen publicada (¿el CI de esta versión no terminó?): se construye en este servidor, tarda varios minutos."
+      compose build --pull "$@"
+    fi
+    rm -f "$pull_log"
+  fi
   info "Levantando workspace..."
   compose up -d --remove-orphans
   wait_healthy "$TS_CONTAINER"
@@ -86,14 +107,19 @@ wait_services() {
 
 # Una vez registrado el nodo, la auth key ya no hace falta: se elimina del .env
 forget_authkey() {
-  if [[ -n "$(env_get TS_AUTHKEY)" ]]; then
-    env_set TS_AUTHKEY ""
-    info "Nodo registrado: TS_AUTHKEY eliminada del .env (la identidad vive en el volumen $TS_VOLUME)"
+  [[ -n "$(env_get TS_AUTHKEY)" ]] || return 0
+  env_set TS_AUTHKEY ""
+  info "Nodo registrado: TS_AUTHKEY eliminada del .env (la identidad vive en el volumen $TS_VOLUME)"
+  if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
     # Recrear ambos (el workspace comparte la red del sidecar) para quitar la key del entorno
     compose up -d --force-recreate
     wait_healthy "$TS_CONTAINER"
     wait_healthy "$CONTAINER"
     wait_services
+  else
+    # Instalación nueva: el workspace aún no existe, basta con recrear el sidecar
+    compose up -d --force-recreate tailscale
+    wait_healthy "$TS_CONTAINER"
   fi
 }
 

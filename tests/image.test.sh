@@ -32,7 +32,9 @@ F="${FAKE_DOCKER_DIR:?}"
 echo "$*" >> "$F/calls"
 case "${1:-} ${2:-}" in
   "manifest inspect") grep -qxF "$3" "$F/published" ;;
-  "pull "*)           grep -qxF "$2" "$F/published" || { echo "manifest unknown" >&2; exit 1; } ;;
+  "pull "*)           grep -qxF "$2" "$F/published" || { echo "manifest unknown" >&2; exit 1; }
+                      if [[ -n "${FAKE_PULL_SLEEP:-}" ]]; then sleep "$FAKE_PULL_SLEEP"; echo "pull-done" >> "$F/calls"; fi ;;
+  "container inspect") grep -qxF "$3" "$F/containers" 2>/dev/null ;;
   "image ls")         cat "$F/local" ;;
   "image rm")         grep -vxF "$3" "$F/local" > "$F/l.tmp"; mv "$F/l.tmp" "$F/local" ;;
   *)                  exit 0 ;;
@@ -181,6 +183,56 @@ t_build_and_up_still_builds_with_custom_config() {   # S3, comportamiento previo
   assert_lacks "no descarga" "$(calls)" "pull $REPO_IMG"
 }
 
+t_exec_bits_set_by_install_keep_ghcr() {   # S1: el chmod +x de normalize_line_endings no es un "cambio local"
+  load_setup
+  git -C "$R" config core.fileMode true
+  git -C "$R" update-index --chmod=-x config/env.sh; git -C "$R" commit -qm "env.sh sin +x"
+  git -C "$R" push -q origin main; git -C "$R" fetch -q origin
+  ( cd "$R" && chmod -x config/env.sh && normalize_line_endings ) >/dev/null 2>&1
+  assert_eq "origen tras chmod +x" ghcr "$(image_source)"
+}
+
+t_install_shows_the_login_while_the_image_downloads() {   # S2: la descarga no retrasa el link de Tailscale
+  load_setup; stub_up; publish "$TAG"
+  ts_wait_login() { echo LOGIN >> "$SB/fake/calls"; }
+  ( FAKE_PULL_SLEEP=2 build_and_up --install ) >/dev/null 2>&1
+  local order; order="$(grep -oE '^LOGIN|^pull-done|up -d --remove-orphans' "$SB/fake/calls" | tr '\n' ' ')"
+  assert_eq "orden" "LOGIN pull-done up -d --remove-orphans " "$order"
+  assert_has "etiqueta local" "$(calls)" "tag $REPO_IMG:$TAG $IMAGE"
+}
+
+t_install_builds_locally_if_the_image_is_not_published() {   # S3: en una instalación nueva no hay contenedor que proteger
+  load_setup; stub_up
+  local rc=0 out
+  out="$( ( build_and_up --install ) 2>&1 )" || rc=$?
+  assert_eq "termina bien" 0 "$rc"
+  assert_has "construye" "$(calls)" "build --pull"
+  assert_has "levanta" "$(calls)" "up -d --remove-orphans"
+  assert_has "explica" "$out" "construye"
+}
+
+t_install_drops_the_authkey_before_starting_the_workspace() {   # S4: el workspace se crea una sola vez
+  load_setup; stub_up; publish "$TAG"
+  env_set TS_AUTHKEY tskey-auth-test
+  ( build_and_up --install ) >/dev/null 2>&1
+  assert_eq "key eliminada" "" "$(env_get TS_AUTHKEY)"
+  local order; order="$(grep -oE 'up -d( --force-recreate)?( tailscale| --remove-orphans)$' "$SB/fake/calls" | tr '\n' '|')"
+  assert_eq "solo se recrea tailscale, luego el workspace" "up -d tailscale|up -d --force-recreate tailscale|up -d --remove-orphans|" "$order"
+}
+
+t_forget_authkey_recreates_both_if_the_workspace_exists() {   # S4, comportamiento previo: comparte la red del sidecar
+  load_setup; stub_up
+  echo "$CONTAINER" > "$SB/fake/containers"
+  env_set TS_AUTHKEY tskey-auth-test
+  ( forget_authkey ) >/dev/null 2>&1
+  assert_has "recrea ambos" "$(calls)" "up -d --force-recreate"
+  assert_lacks "no solo tailscale" "$(calls)" "--force-recreate tailscale"
+}
+
+t_workspace_healthcheck_probes_fast_while_starting() {   # S5: el primer "healthy" no espera el intervalo de 30 s
+  grep -qE '^HEALTHCHECK .*--start-interval=[0-9]+s' "$ROOT/Dockerfile" && ok || nok "HEALTHCHECK del Dockerfile sin --start-interval"
+}
+
 # ================================================================ upgrade y rollback
 mk_origin() {   # origin con v2 publicado o no; el servidor sigue en v1
   V1="$(git -C "$R" rev-parse HEAD)"
@@ -264,7 +316,10 @@ for t in t_defaults_use_ghcr t_env_example_documents_image_source t_explicit_def
          t_local_edits_in_the_build_context_build_locally t_local_edits_outside_the_context_keep_ghcr t_folder_without_git_builds_locally \
          t_other_branch_or_fork_builds_locally t_local_commits_in_the_context_build_locally t_exported_build_args_build_locally \
          t_build_and_up_pulls_and_tags_the_published_image t_build_and_up_fails_without_touching_the_container_if_not_published \
-         t_build_and_up_still_builds_with_custom_config t_upgrade_aborts_before_touching_files_if_not_published \
+         t_build_and_up_still_builds_with_custom_config t_exec_bits_set_by_install_keep_ghcr t_install_shows_the_login_while_the_image_downloads \
+         t_install_builds_locally_if_the_image_is_not_published t_install_drops_the_authkey_before_starting_the_workspace \
+         t_forget_authkey_recreates_both_if_the_workspace_exists t_workspace_healthcheck_probes_fast_while_starting \
+         t_upgrade_aborts_before_touching_files_if_not_published \
          t_upgrade_proceeds_when_published t_upgrade_with_custom_config_does_not_need_ghcr t_upgrade_with_invalid_source_changes_nothing \
          t_rollback_aborts_if_previous_image_not_published t_rollback_to_a_version_without_ghcr_support_is_not_blocked \
          t_clean_removes_old_ghcr_tags_only; do
