@@ -183,9 +183,17 @@ t_base_image_and_apt_repos_are_debian_13() {   # trixie: los repos externos debe
   [[ -z "$left" ]] && ok || nok "quedan referencias a Debian 12: $left"
 }
 
+t_playwright_installs_only_the_browser_each_tool_uses() {   # medido: cli/mcp usan el Chromium completo; la librería en headless, solo el headless-shell
+  grep -q 'playwright install --only-shell chromium' "$DOCKERFILE" && ok || nok "la librería playwright debe instalar solo el headless-shell (--only-shell)"
+  grep -q 'playwright install-deps chromium' "$DOCKERFILE" && ok || nok "las librerías de sistema de Chromium deben instalarse aparte (install-deps)"
+  grep -q "find /usr/local/lib/node_modules/@playwright -path '\*/playwright-core/cli.js'" "$DOCKERFILE" && ok || nok "solo cli/mcp (@playwright/*) deben descargar el Chromium completo"
+  grep -q 'install --no-shell chromium' "$DOCKERFILE" && ok || nok "cli/mcp deben instalar Chromium sin headless-shell (--no-shell)"
+  ! grep -q 'playwright install --with-deps chromium' "$DOCKERFILE" && ok || nok "no debe quedar 'install --with-deps chromium' (baja los dos navegadores)"
+}
+
 for t in t_every_pin_arg_has_a_concrete_default t_npm_packages_are_installed_with_explicit_versions \
          t_uv_and_mise_are_pinned t_compose_forwards_every_pin t_compose_defaults_match_dockerfile t_every_build_arg_default_matches_dockerfile \
-         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_base_image_and_apt_repos_are_debian_13 t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out t_ci_checks_that_dotenv_pins_reach_the_build; do
+         t_env_example_documents_every_pin t_tailscale_tag_is_not_stable t_dependabot_watches_docker_and_compose t_dependabot_ignores_debian_major_bumps t_base_image_and_apt_repos_are_debian_13 t_playwright_installs_only_the_browser_each_tool_uses t_herdr_and_gentle_ai_checksums_are_pinned t_herdr_and_gentle_ai_are_not_installed_with_live_scripts t_doppler_is_installed_from_its_pinned_release_not_apt t_agy_always_installs_the_latest t_image_label_lists_every_pinned_tool t_env_example_pins_are_commented_out t_ci_checks_that_dotenv_pins_reach_the_build; do
   run "$t"
 done
 

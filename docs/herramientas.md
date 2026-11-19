@@ -183,3 +183,5 @@ claude mcp add playwright -- playwright-mcp # registrar el servidor MCP en Claud
 ```
 
 `PLAYWRIGHT_MCP_BROWSER=chromium` ya viene definido, así que no intenta usar Google Chrome, que necesitaría root.
+
+La imagen trae solo el navegador que usa cada herramienta: el Chromium completo para `playwright-cli` y `playwright-mcp`, y el `chromium-headless-shell` para la librería `playwright` en modo headless (lo normal en un servidor). Si necesitas el Chromium completo con la librería (por ejemplo, `channel: 'chromium'`), descárgalo con `playwright install --no-shell chromium`.

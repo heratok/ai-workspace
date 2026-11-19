@@ -151,15 +151,19 @@ RUN pkgs=("pnpm@${PNPM_VERSION:-latest}") \
 # ---------------------------------------------------------------------------
 # 5. Chromium de Playwright + sus librerías (reemplaza la lista manual de libs)
 # ---------------------------------------------------------------------------
-# playwright-cli y playwright-mcp traen su propia versión de Playwright: se descarga
-# el Chromium que corresponde a cada una (si la revisión coincide, no se duplica).
+# Solo el navegador que usa cada herramienta (medido; antes se bajaban los dos de cada revisión, ~1,4 GB):
+# - playwright (librería): en headless usa el chromium-headless-shell (~270 MB), no el Chromium completo.
+# - playwright-cli y playwright-mcp: traen su propio playwright-core (otra revisión) y usan el Chromium
+#   completo (~400 MB), nunca el headless-shell. Si sus revisiones coinciden, no se duplica.
+# Un proyecto con su propio @playwright/test descarga lo suyo con "npx playwright install chromium".
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     if [[ "${INSTALL_PLAYWRIGHT}" == "true" && "${INSTALL_PLAYWRIGHT_BROWSERS}" == "true" ]]; then \
-      playwright install --with-deps chromium \
-   && find /usr/local/lib/node_modules -path '*/playwright-core/cli.js' -print0 \
-      | xargs -0 -r -I{} node {} install chromium; \
+      playwright install-deps chromium \
+   && playwright install --only-shell chromium \
+   && find /usr/local/lib/node_modules/@playwright -path '*/playwright-core/cli.js' -print0 \
+      | xargs -0 -r -I{} node {} install --no-shell chromium; \
     fi \
  && mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}"
 
