@@ -87,6 +87,20 @@ if compgen -G "$HOME_DIR/.config/devdb/autostart.*" >/dev/null; then
   runuser -u "$USERNAME" -- env HOME="$HOME_DIR" USER="$USERNAME" /usr/local/bin/devdb autostart || log "AVISO: devdb autostart falló"
 fi
 
+# 6b. Servidor de Herdr como "ai": los agentes y sus clientes (Ovis, apps) lo encuentran sin abrir una sesión SSH.
+#     "herdr" en SSH se conecta a este mismo servidor. HERDR_AUTOSTART=false en el .env lo desactiva.
+run_as_ai() {
+  runuser -u "$USERNAME" -- env HOME="$HOME_DIR" USER="$USERNAME" LOGNAME="$USERNAME" SHELL=/usr/bin/zsh \
+    PATH="$HOME_DIR/.local/bin:$PATH" "$@"
+}
+HERDR_PID=""
+if [[ "${HERDR_AUTOSTART:-true}" != "false" ]] && command -v herdr >/dev/null; then
+  log "Iniciando el servidor de Herdr"
+  # En segundo plano: si no arranca, el contenedor sigue y el motivo queda en ~/.config/herdr/herdr-autostart.log
+  run_as_ai bash -c 'mkdir -p ~/.config/herdr && exec herdr server >>~/.config/herdr/herdr-autostart.log 2>&1' &
+  HERDR_PID=$!
+fi
+
 # 7. Validar configuración y arrancar
 # sshd no va con exec: tini solo avisa a este proceso, y PostgreSQL/Redis (devdb) morirían por SIGKILL.
 # Al recibir TERM/INT se detienen limpio las bases de datos y luego sshd (stop_grace_period: 30s).
@@ -96,6 +110,11 @@ SSHD_PID=$!
 
 shutdown() {
   trap '' TERM INT
+  if [[ -n "$HERDR_PID" ]]; then
+    log "Deteniendo Herdr..."
+    run_as_ai herdr server stop >/dev/null 2>&1 || kill -TERM "$HERDR_PID" 2>/dev/null || true
+    wait "$HERDR_PID" 2>/dev/null || true
+  fi
   log "Deteniendo bases de datos locales y sshd..."
   local db
   for db in postgres redis; do   # una a una: si una falla, la otra se detiene igual

@@ -143,6 +143,8 @@ Si un instalador pide `sudo` o escribe en `/usr/local`, no va a funcionar como `
 herdr          # abre o retoma tus sesiones de agentes (Claude Code, opencode, Pi…)
 ```
 
+El servidor de Herdr arranca solo con el contenedor, como el usuario `ai`. Así lo encuentran sus clientes, como [Ovis](https://github.com/devswha/ovis) en el móvil o el navegador, sin que abras una sesión SSH, y `herdr` por SSH se conecta a ese mismo servidor. Se detiene limpio al apagar el contenedor. Para desactivarlo, pon `HERDR_AUTOSTART=false` en el `.env` y ejecuta `./setup.sh update`. Si no arranca, el motivo queda en `~/.config/herdr/herdr-autostart.log`.
+
 Se instala en `/usr/local/bin` desde el binario de la versión fijada (`HERDR_VERSION`), verificado con su SHA-256; no se ejecuta ningún instalador descargado en el momento (ver [versiones fijadas](configuracion.md#versiones-fijadas-de-la-imagen)). Se actualiza con `./setup.sh update`. Para una versión más nueva solo para ti, sin root: `curl -fsSL https://herdr.dev/install.sh | sh` (instala en `~/.local/bin`, que tiene prioridad en el `PATH`).
 
 ### Gentle AI y Antigravity CLI (agy)
