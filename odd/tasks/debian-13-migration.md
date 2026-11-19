@@ -29,10 +29,11 @@ Strict TDD: add/adjust static tests first (e.g. no remaining `bookworm`, repos m
 
 ## Tasks
 - [x] B1 Tests (RED): no `bookworm`/`debian/12`/`Debian 12` left outside this doc; repos match base
-- [ ] B2 Dockerfile + packages.apt on trixie; fix what the build reports
+- [x] B2 Dockerfile + packages.apt on trixie; fix what the build reports
 - [x] B3 Update texts (AGENTS.md, landing, backup.sh fallback, zshrc)
-- [ ] B4 Re-measure security baseline and capability set; update .trivyignore/.hadolint.yaml if needed
+- [x] B4 Re-measure security baseline and capability set; update .trivyignore/.hadolint.yaml if needed
 - [x] B5 Remove the dependabot `ignore` for debian major (or bump the pin consciously)
 
 ## Progress / Next
 2026-11-19: B1 RED (pins.test.sh t_base_image_and_apt_repos_are_debian_13: 4 fallos) -> GREEN (170/0). Verificado contra repos reales: trixie-pgdg y packages.microsoft.com/debian/13 (mssql-tools18, msodbcsql18) publicados; todos los paquetes de config/packages.apt existen en trixie; Playwright 1.64 soporta debian13-x64/arm64; fzf 0.60 mantiene /usr/share/doc/fzf/examples/*.zsh. B5: se mantiene el ignore de saltos mayores (13 -> 14 también debe ser deliberado), comentario generalizado. Suite en Linux: todo verde salvo docs.test.sh (15 fallos que ya ocurren en main en ese entorno). B2/B4: build local en curso; CI del PR.
+2026-11-19 (build local, Docker 29.7.2): build OK en 13.7, sin cambios en packages.apt. OpenSSH 10.0p2: login por clave con pty y ws-doctor OK con cap_drop ALL + las 8 capacidades del compose y no-new-privileges (sin capacidades nuevas). Trivy (0.75.0, --ignore-unfixed): 0 CRITICAL; 30 HIGH en Node.js (7), doppler (7) y gentle-ai (16), igual que la línea base (binarios Go/Node). Sin cambios en .trivyignore ni .hadolint.yaml (hadolint lo valida el CI). Pendiente: CI del PR.
