@@ -6,7 +6,7 @@ ARG UV_VERSION=0.13.0
 # Docker no expande variables en "COPY --from=": uv va como etapa propia
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
-FROM debian:12-slim
+FROM debian:13-slim
 # Etiqueta para que "setup.sh clean" borre solo imágenes viejas de este proyecto
 LABEL org.ai-workspace.image="true"
 
@@ -83,7 +83,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
  && echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/pgdg.gpg \
- && echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+ && echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list \
  && pkgs=(gh "postgresql-client-${PG_MAJOR}" libpq-dev) \
  && if [[ "${INSTALL_PG_SERVER}" == "true" ]]; then \
@@ -94,7 +94,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     fi \
  && if [[ "${INSTALL_MSSQL_TOOLS}" == "true" ]]; then \
       curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
-   && echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+   && echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/13/prod trixie main" \
         > /etc/apt/sources.list.d/microsoft.list \
    && pkgs+=(mssql-tools18 unixodbc-dev); \
     fi \
