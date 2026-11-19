@@ -48,7 +48,8 @@ image_source() {
   local custom; custom="$(image_custom_args | tr '\n' ' ')"
   [[ -z "$custom" ]] || { echo "build configuración propia en .env: ${custom% }"; return 0; }
   local -a paths; mapfile -t paths < <(image_tag --paths)
-  [[ -z "$(g status --porcelain -- "${paths[@]}")" ]] || { echo "build cambios locales en ${paths[*]}"; return 0; }
+  # Sin fileMode: el chmod +x de normalize_line_endings no cambia la imagen y no debe contar como edición local
+  [[ -z "$(g -c core.fileMode=false status --porcelain -- "${paths[@]}")" ]] || { echo "build cambios locales en ${paths[*]}"; return 0; }
   echo ghcr
 }
 
@@ -66,11 +67,15 @@ image_check_published() {
   return 1
 }
 
-# Descarga la imagen de HEAD y la deja con el nombre local de la instancia ($IMAGE)
+# Descarga la imagen de HEAD y la deja con el nombre local de la instancia ($IMAGE).
+# --try: si no se puede descargar, devuelve 1 en vez de abortar (la instalación construye en su lugar).
 image_pull() {
   local ref; ref="$IMAGE_REPO:$(image_tag)"
   info "Descargando la imagen publicada por el CI: $ref"
-  docker pull "$ref" || die "No se pudo descargar $ref (el CI de esta versión no terminó o falló). El contenedor actual sigue igual. Reintenta con ./setup.sh update cuando el CI esté en verde, o construye en el servidor con AIWS_IMAGE_SOURCE=build en .env."
+  if ! docker pull "$ref"; then
+    [[ "${1:-}" == --try ]] && return 1
+    die "No se pudo descargar $ref (el CI de esta versión no terminó o falló). El contenedor actual sigue igual. Reintenta con ./setup.sh update cuando el CI esté en verde, o construye en el servidor con AIWS_IMAGE_SOURCE=build en .env."
+  fi
   docker tag "$ref" "$IMAGE"
 }
 

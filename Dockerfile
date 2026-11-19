@@ -275,7 +275,7 @@ ENV WORKSPACE_USER=${USERNAME}
 WORKDIR /workspace
 EXPOSE 22 60000-60010/udp
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=2s --retries=3 \
   CMD bash -c '</dev/tcp/127.0.0.1/22' || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

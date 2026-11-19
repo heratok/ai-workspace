@@ -73,7 +73,9 @@ Si algo de eso no se cumple, la imagen se **construye en el servidor**, como sie
 
 Con la imagen de GHCR, `upgrade --rebuild` y `update` vuelven a **descargar** la etiqueta actual en vez de reconstruir: los parches de paquetes del sistema llegan cuando la corrida del lunes del CI vuelve a publicarla. Una rama o un fork (`AIWS_REPO_URL`, `AIWS_REPO_BRANCH`) y los commits locales que no están en `origin/main` siempre se construyen en el servidor, porque el CI solo publica `main` de este repo.
 
-**Si la imagen de esa versión todavía no está publicada** (el CI no terminó o falló), `upgrade` y `rollback` lo avisan y **no cambian nada**; `update` falla sin tocar el contenedor en marcha. Reintenta cuando el CI esté en verde, o usa `AIWS_IMAGE_SOURCE=build`.
+En `install` la descarga corre en segundo plano mientras se conecta Tailscale, así que el link de inicio de sesión aparece en segundos. El bit de ejecución que `install` pone en `config/*.sh` no cuenta como cambio local.
+
+**Si la imagen de esa versión todavía no está publicada** (el CI no terminó o falló), `install` la construye en el servidor (no hay contenedor que proteger); `upgrade` y `rollback` lo avisan y **no cambian nada**; `update` falla sin tocar el contenedor en marcha. Reintenta cuando el CI esté en verde, o usa `AIWS_IMAGE_SOURCE=build`.
 
 `clean` (corre tras cada `update`) borra las etiquetas viejas de `ghcr.io/heratok/ai-workspace` y deja solo la actual. Tus proyectos (`/workspace`) y tu configuración (`/home/ai`) viven en volúmenes: no dependen de cómo se obtuvo la imagen.
 

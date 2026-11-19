@@ -73,8 +73,8 @@ Clonar desde GitHub permite actualizar luego con `./setup.sh upgrade`.
 3. Crea `.env` a partir de `env.example`.
 4. Pide la auth key, o muestra un link de inicio de sesión si no la pegas.
 5. Aplica las migraciones pendientes y crea los volúmenes.
-6. Construye la imagen y levanta los contenedores.
-7. **Borra la auth key del `.env`** una vez registrado el nodo.
+6. Obtiene la imagen ([la descarga de GHCR o la construye](docs/operacion.md#de-dónde-sale-la-imagen)) y levanta Tailscale. La descarga corre en segundo plano mientras inicias sesión en Tailscale.
+7. **Borra la auth key del `.env`** una vez registrado el nodo, antes de crear el workspace.
 8. Autoriza tu clave SSH.
 9. Deja el comando [`aiws`](docs/instancias.md#gestionar-instancias-con-aiws) en el `PATH`.
 10. Ejecuta `ws-doctor`.

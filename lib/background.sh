@@ -126,8 +126,7 @@ EOF
 install_steps() {
   run_migrations
   create_volumes
-  build_and_up
-  forget_authkey
+  build_and_up --install
   if [[ -s "$PENDING_KEY" ]]; then
     add_key "$PENDING_KEY" && rm -f "$PENDING_KEY" && touch "$KEY_OK"
   elif docker exec "$CONTAINER" test -s "/home/$WS_USER/.ssh/authorized_keys"; then
