@@ -29,9 +29,9 @@ ARG MISE_VERSION=v2026.10.8
 # Herdr y Gentle AI: binario de la release fijada, verificado con su checksum (sin ejecutar instaladores en vivo).
 # Herdr: SHA256 de cada binario (GitHub los publica como "digest"); Gentle AI: se verifica con el checksums.txt de su release.
 # Cámbialos con scripts/update-pins.sh (list / choose / set / latest), no a mano.
-ARG HERDR_VERSION=0.9.4
-ARG HERDR_SHA256_AMD64=493304fbefb0ed0ea0455f373b47f48d24e8774bc7974f4c916ad2e937675b23
-ARG HERDR_SHA256_ARM64=9511cb70982c1ef115f232058e7ed7cf9640aa5a2c0ca78934cefda3aeb093fd
+ARG HERDR_VERSION=0.9.5
+ARG HERDR_SHA256_AMD64=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
+ARG HERDR_SHA256_ARM64=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c
 ARG GENTLE_AI_VERSION=4.1.1
 # Doppler: release de GitHub verificada con su checksums.txt (antes: repo apt sin versión).
 ARG DOPPLER_VERSION=3.77.0
