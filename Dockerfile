@@ -32,7 +32,7 @@ ARG MISE_VERSION=v2026.10.8
 ARG HERDR_VERSION=0.9.5
 ARG HERDR_SHA256_AMD64=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
 ARG HERDR_SHA256_ARM64=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c
-ARG GENTLE_AI_VERSION=4.1.1
+ARG GENTLE_AI_VERSION=4.6.0
 # Doppler: release de GitHub verificada con su checksums.txt (antes: repo apt sin versión).
 ARG DOPPLER_VERSION=3.77.0
 # --- Componentes (se eligen con "./setup.sh components"; true/false) ---
