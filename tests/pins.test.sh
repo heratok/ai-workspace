@@ -37,7 +37,7 @@ t_every_pin_arg_has_a_concrete_default() {
 t_npm_packages_are_installed_with_explicit_versions() {
   local body; body="$(<"$DOCKERFILE")"
   assert_has "claude"   "$body" '@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}'
-  assert_has "pi"       "$body" '@mariozechner/pi-coding-agent@${PI_VERSION:-latest}'
+  assert_has "pi"       "$body" '@earendil-works/pi-coding-agent@${PI_VERSION:-latest}'
   assert_has "opencode" "$body" 'opencode-ai@${OPENCODE_VERSION:-latest}'
   assert_has "pnpm"     "$body" 'pnpm@${PNPM_VERSION:-latest}'
   assert_has "playwright" "$body" 'playwright@${PLAYWRIGHT_VERSION:-latest}'

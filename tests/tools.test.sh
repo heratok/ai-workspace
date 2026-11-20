@@ -373,6 +373,36 @@ t_after_the_migration_tools_marks_the_kept_pin_as_an_override() {
   assert_has "pi con origen .env" "$out" "0.70.0"
 }
 
+# ------------------------------------------------- pi cambió de paquete (@mariozechner -> @earendil-works, desde 0.74.0)
+MIGRATION_PI="$ROOT/migrations/004-pi-cambio-de-paquete.sh"
+run_migration_pi() {
+  ( cd "$SB/repo" && bash -c 'set -Eeuo pipefail; source "$1"; source "$2"' _ "$SB/repo/setup.sh" "$MIGRATION_PI" ) 2>&1
+}
+
+t_pi_migration_drops_versions_that_only_exist_in_the_old_package() {
+  load_tools; [[ -f "$MIGRATION_PI" ]] || { nok "falta migrations/004-pi-cambio-de-paquete.sh"; return 0; }
+  local host_before; host_before="$(dotenv TS_HOSTNAME)"
+  printf 'PI_VERSION=0.73.1\n' >> "$ENVF"
+  local out; out="$(run_migration_pi)"; assert_eq "código de salida" "0" "$?"
+  assert_eq "0.73.1 no existe en @earendil-works: se quita" "" "$(dotenv PI_VERSION)"
+  assert_has "explica el cambio de paquete" "$out" "@earendil-works/pi-coding-agent"
+  assert_eq "el resto del .env intacto" "$host_before" "$(dotenv TS_HOSTNAME)"
+}
+
+t_pi_migration_keeps_versions_of_the_new_package() {
+  load_tools; [[ -f "$MIGRATION_PI" ]] || { nok "falta la migración 004"; return 0; }
+  printf 'PI_VERSION=0.74.0\n' >> "$ENVF"; run_migration_pi >/dev/null
+  assert_eq "0.74.0 existe en el paquete nuevo: se conserva" "0.74.0" "$(dotenv PI_VERSION)"
+}
+
+t_pi_migration_is_idempotent_and_survives_a_missing_dotenv() {
+  load_tools; [[ -f "$MIGRATION_PI" ]] || { nok "falta la migración 004"; return 0; }
+  printf 'PI_VERSION=0.70.0\n' >> "$ENVF"
+  run_migration_pi >/dev/null; local once; once="$(cksum < "$ENVF")"
+  run_migration_pi >/dev/null; assert_eq "segunda ejecución sin cambios" "$once" "$(cksum < "$ENVF")"
+  rm -f "$ENVF"; run_migration_pi >/dev/null; assert_eq "sin .env no falla" "0" "$?"
+}
+
 # ------------------------------------------------- sin perl en el servidor (solo Docker, git y curl están garantizados)
 t_tools_menu_notice_and_migration_work_without_perl() {
   load_tools
@@ -407,7 +437,9 @@ for t in t_tools_shows_the_table_with_outdated_tools t_tools_enter_means_no_chan
          t_menu_shows_the_notice_and_the_new_option t_main_dispatches_the_tools_command t_help_and_aiws_know_about_tools \
          t_a_fresh_dotenv_copied_from_env_example_has_no_pins t_migration_removes_pins_equal_to_the_repo_defaults_and_keeps_the_rest \
          t_migration_handles_the_herdr_group_as_a_unit t_migration_is_idempotent_and_survives_a_missing_dotenv \
-         t_after_the_migration_tools_marks_the_kept_pin_as_an_override t_tools_menu_notice_and_migration_work_without_perl t_migration_removes_the_former_floating_default_of_tailscale; do
+         t_after_the_migration_tools_marks_the_kept_pin_as_an_override t_tools_menu_notice_and_migration_work_without_perl t_migration_removes_the_former_floating_default_of_tailscale \
+         t_pi_migration_drops_versions_that_only_exist_in_the_old_package t_pi_migration_keeps_versions_of_the_new_package \
+         t_pi_migration_is_idempotent_and_survives_a_missing_dotenv; do
   run "$t"
 done
 

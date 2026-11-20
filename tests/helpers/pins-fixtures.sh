@@ -19,6 +19,11 @@ npm_fx() {   # npm_fx <paquete> <última> <versiones...>: doc /latest y doc comp
   printf '{"bin":{"x":"cli.js"},"dist":{"shasum":"abc"},"name":"%s","version":"%s"}' "$pkg" "$latest" > "$FIX/npm_${enc}_latest"
   printf '{"name":"%s","dist-tags":{"latest":"%s"},"versions":{%s}}' "$pkg" "$latest" "${vs%,}" > "$FIX/npm_${enc}"
 }
+npm_deprecate() {   # npm_deprecate <paquete> <mensaje>: marca como deprecada la versión /latest del paquete
+  local f="$FIX/npm_${1//\//%2F}_latest" doc
+  doc="$(<"$f")"
+  printf '%s,"deprecated":"%s"}' "${doc%\}}" "$2" > "$f"
+}
 gh_fx() {    # gh_fx <owner/repo> <tag>...: lista de releases (la primera es la más nueva; "!tag" = prerelease) y un doc por tag
   local repo="$1"; shift
   local base="${repo//\//_}" items="" t pre
@@ -61,7 +66,7 @@ EOF
   echo '{"tag_name":"v4.1.1","prerelease":false}' > "$FIX/Gentleman-Programming_gentle-ai_releases_tags_v4.1.1"
   # --- fuentes de las demás herramientas (npm y releases de GitHub) ---
   npm_fx @anthropic-ai/claude-code 2.1.310 2.1.296 2.1.300 2.2.0-beta.1
-  npm_fx @mariozechner/pi-coding-agent 0.73.1 0.73.0
+  npm_fx @earendil-works/pi-coding-agent 0.73.1 0.73.0
   npm_fx opencode-ai 1.19.0 1.18.0
   npm_fx pnpm 12.18.0 12.17.0
   npm_fx playwright 1.65.0 1.64.0

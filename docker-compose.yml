@@ -60,7 +60,7 @@ services:
         NODE_MAJOR: ${NODE_MAJOR:-24}
         NODE_VERSION: ${NODE_VERSION:-}             # vacío = última del major
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.296}   # versiones fijadas (env.example)
-        PI_VERSION: ${PI_VERSION:-0.73.1}
+        PI_VERSION: ${PI_VERSION:-1.6.0}
         OPENCODE_VERSION: ${OPENCODE_VERSION:-1.19.0}
         PNPM_VERSION: ${PNPM_VERSION:-12.18.0}
         PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.64.0}
