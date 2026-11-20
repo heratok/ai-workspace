@@ -5,7 +5,7 @@ if grep -qE '^NPM_GLOBAL_PACKAGES=' "$ENV_FILE" 2>/dev/null; then
   extra=""
   for p in $old; do
     case "$p" in
-      @anthropic-ai/claude-code|@mariozechner/pi-coding-agent|playwright|@playwright/cli|@playwright/mcp) ;;
+      @anthropic-ai/claude-code|@mariozechner/pi-coding-agent|@earendil-works/pi-coding-agent|playwright|@playwright/cli|@playwright/mcp) ;;
       opencode-ai) env_set INSTALL_OPENCODE true ;;
       *) extra+="${extra:+ }$p" ;;
     esac

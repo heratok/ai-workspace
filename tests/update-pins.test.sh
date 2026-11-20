@@ -222,6 +222,24 @@ t_check_a_failing_source_is_reported_without_failing_the_rest() {
   assert_eq "las demás siguen" "outdated" "$(tsv_field claude-code 6 "$out")"
 }
 
+t_check_flags_a_deprecated_npm_package() {
+  mk_root; npm_deprecate @earendil-works/pi-coding-agent "use @acme/pi instead"
+  local out; out="$(pin check --tsv)"; assert_eq "no es fatal" "0" "$?"
+  assert_eq "pi deprecado" "deprecated" "$(tsv_field pi 6 "$out")"
+  assert_eq "las demás siguen" "outdated" "$(tsv_field claude-code 6 "$out")"
+  assert_has "resumen lo cuenta" "$(pin check)" "1 deprecado"
+}
+
+t_latest_refuses_a_deprecated_npm_package_and_changes_nothing() {
+  mk_root; npm_deprecate @earendil-works/pi-coding-agent "use @acme/pi instead"
+  local before out; before="$(snapshot)"
+  out="$(pin latest pi </dev/null)"; (( $? != 0 )) && ok || nok "debía fallar con un paquete deprecado"
+  assert_has "dice que está deprecado" "$out" "deprecado"
+  assert_has "muestra el aviso de npm" "$out" "use @acme/pi instead"
+  out="$(pin set pi latest)"; (( $? != 0 )) && ok || nok "set latest debía fallar"
+  assert_eq "archivos intactos" "$before" "$(snapshot)"
+}
+
 t_check_env_target_marks_overrides_and_uses_dotenv_value() {
   mk_root; echo "CLAUDE_CODE_VERSION=2.1.300" >> "$R/.env"
   local out; out="$(pin --target env check --tsv)"
@@ -455,7 +473,8 @@ for t in t_script_exists_and_has_help t_list_herdr_shows_five_stable_versions_ne
          t_choose_cancels_on_empty_input t_choose_rejects_an_out_of_range_number t_unknown_tool_or_command_fails \
          t_a_failed_fetch_changes_nothing \
          t_check_tsv_reports_each_tool_with_its_status t_check_human_table_has_header_and_summary t_check_does_not_flag_a_pin_newer_than_latest \
-         t_check_a_failing_source_is_reported_without_failing_the_rest t_check_env_target_marks_overrides_and_uses_dotenv_value t_check_env_target_skips_disabled_components \
+         t_check_a_failing_source_is_reported_without_failing_the_rest t_check_flags_a_deprecated_npm_package \
+         t_latest_refuses_a_deprecated_npm_package_and_changes_nothing t_check_env_target_marks_overrides_and_uses_dotenv_value t_check_env_target_skips_disabled_components \
          t_set_env_target_writes_only_to_dotenv t_set_env_target_replaces_instead_of_duplicating t_set_env_target_requires_an_existing_dotenv \
          t_set_herdr_in_env_target_writes_version_and_both_checksums t_set_latest_keyword_resolves_the_newest_version t_set_npm_unknown_or_prerelease_version_fails_and_changes_nothing \
          t_set_mise_keeps_the_v_prefix_everywhere t_set_tailscale_updates_compose_and_env_example_but_not_the_dockerfile t_set_uv_doppler_and_the_other_npm_packages \

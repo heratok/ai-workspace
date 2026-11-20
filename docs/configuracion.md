@@ -139,4 +139,6 @@ scripts/update-pins.sh set herdr 0.9.3     # fija una versión concreta (o "late
 scripts/update-pins.sh latest              # fija la última estable de todas, sin preguntar
 ```
 
+Si un paquete npm aparece como `deprecated` en `check` (y `latest`/`set latest` se niegan a fijarlo), lo más probable es que cambió de nombre: el paquete viejo deja de publicar y su "última versión" se congela. Pasó con Pi (`@mariozechner/pi-coding-agent` → `@earendil-works/pi-coding-agent`). Actualiza el nombre en `tool_spec` de `scripts/update-pins.sh` y en el `Dockerfile`.
+
 Después revisa el cambio con `git diff` y abre un PR: el CI construye la imagen y comprueba que las herramientas funcionan. Solo `agy` flota a propósito: siempre instala la última al construir, porque Google no publica un listado de versiones ni URLs predecibles (su bucket no se puede listar y cada build lleva un id impredecible). `./setup.sh update` la renueva.

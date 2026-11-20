@@ -39,7 +39,7 @@ usage() { awk 'NR >= 3 { if ($0 ~ /^# =+$/) exit; print }' "${BASH_SOURCE[0]}" |
 tool_spec() {
   case "$1" in
     claude-code)    echo "npm|Claude Code|CLAUDE_CODE_VERSION|@anthropic-ai/claude-code|||1|INSTALL_CLAUDE" ;;
-    pi)             echo "npm|Pi|PI_VERSION|@mariozechner/pi-coding-agent|||1|INSTALL_PI" ;;
+    pi)             echo "npm|Pi|PI_VERSION|@earendil-works/pi-coding-agent|||1|INSTALL_PI" ;;
     opencode)       echo "npm|opencode|OPENCODE_VERSION|opencode-ai|||1|INSTALL_OPENCODE" ;;
     pnpm)           echo "npm|pnpm|PNPM_VERSION|pnpm|||1|" ;;
     playwright)     echo "npm|Playwright|PLAYWRIGHT_VERSION|playwright|||1|INSTALL_PLAYWRIGHT" ;;
@@ -101,11 +101,17 @@ versions_of() {   # versions_of <id> <N>
   load_spec "$1"
   if [[ "$S_KIND" == npm ]]; then npm_versions "$S_SRC" "$2"; else gh_versions "$S_SRC" "$S_TAGP" "$2"; fi
 }
-latest_of() {   # versión estable más nueva (sin prefijos), o falla
+latest_of() {   # versión estable más nueva (sin prefijos), o falla (3 = paquete npm deprecado: quizá cambió de nombre)
   load_spec "$1"
-  local v
+  local v doc dep
   if [[ "$S_KIND" == npm ]]; then
-    v="$(fetch "$(npm_url "$S_SRC")/latest" application/json | grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' | head -n1 | sed -E 's/.*:[[:space:]]*"([^"]+)"$/\1/')" || return 1
+    doc="$(fetch "$(npm_url "$S_SRC")/latest" application/json)" || return 1
+    dep="$(printf '%s' "$doc" | json_pairs deprecated | head -n1 | sed -E 's/^"deprecated"[[:space:]]*:[[:space:]]*"?//; s/"$//')"
+    if [[ -n "$dep" && "$dep" != false && "$dep" != null ]]; then
+      echo "[error] $S_SRC está deprecado en npm: $dep" >&2
+      return 3
+    fi
+    v="$(printf '%s' "$doc" | grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' | head -n1 | sed -E 's/.*:[[:space:]]*"([^"]+)"$/\1/')"
     [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
   else
     v="$(gh_versions "$S_SRC" "$S_TAGP" 1 | cut -f1)" || return 1
@@ -275,20 +281,24 @@ cmd_latest() {
 
 # Compara lo fijado con lo último. Una consulta por herramienta, en paralelo; una que falle no afecta al resto.
 cmd_check() {
-  local tsv=false t id pin origin latest status ok_n=0 out_n=0 err_n=0 tmp
+  local tsv=false t id pin origin latest status ok_n=0 out_n=0 err_n=0 dep_n=0 tmp
   [[ "${1:-}" == --tsv ]] && tsv=true
   tmp="$(mktemp -d)"
   trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$tmp"; exit 143' TERM INT   # si te cancelan (timeout), no dejes consultas huérfanas
   local -a ids=()
   for t in "${TOOLS[@]}"; do if enabled "$t"; then ids+=("$t"); fi; done
-  for id in "${ids[@]}"; do ( latest_of "$id" > "$tmp/$id" 2>/dev/null || echo ERROR > "$tmp/$id" ) & done
+  for id in "${ids[@]}"; do
+    ( rc=0; latest_of "$id" > "$tmp/$id" 2>/dev/null || rc=$?
+      if (( rc == 3 )); then echo DEPRECATED > "$tmp/$id"; elif (( rc != 0 )); then echo ERROR > "$tmp/$id"; fi ) &
+  done
   wait
   local -a rows=()
   for id in "${ids[@]}"; do
     load_spec "$id"
     IFS=$'\t' read -r pin origin <<< "$(pinned_of)"
     latest="$(cat "$tmp/$id" 2>/dev/null || echo ERROR)"
-    if [[ "$latest" == ERROR || -z "$latest" ]]; then status=error; latest="?"; err_n=$((err_n + 1))
+    if [[ "$latest" == DEPRECATED ]]; then status=deprecated; latest="?"; dep_n=$((dep_n + 1))
+    elif [[ "$latest" == ERROR || -z "$latest" ]]; then status=error; latest="?"; err_n=$((err_n + 1))
     elif ver_gt "$latest" "${pin#"$S_VALP"}"; then status=outdated; latest="$S_VALP$latest"; out_n=$((out_n + 1))
     else status=ok; latest="$S_VALP$latest"; ok_n=$((ok_n + 1)); fi
     rows+=("$id"$'\t'"$S_LABEL"$'\t'"$pin"$'\t'"$latest"$'\t'"$origin"$'\t'"$status")
@@ -302,6 +312,7 @@ cmd_check() {
     printf '%-16s %-12s %-12s %-7s %s\n' "$f1" "$f3" "$f4" "$f5" "$f6"
   done
   echo "$out_n con versión nueva, $ok_n al día, $err_n sin respuesta (de ${#ids[@]})."
+  if (( dep_n > 0 )); then echo "$dep_n deprecado(s) en npm: el paquete pudo cambiar de nombre; actualiza tool_spec en $(basename "${BASH_SOURCE[0]}")."; fi
 }
 
 cmd_reset() {

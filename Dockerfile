@@ -19,7 +19,7 @@ ARG NODE_MAJOR=24
 ARG NODE_VERSION=""
 # --- Versiones fijadas de las CLIs (vacío o "latest" = la última al construir) ---
 ARG CLAUDE_CODE_VERSION=2.1.296
-ARG PI_VERSION=0.73.1
+ARG PI_VERSION=1.6.0
 ARG OPENCODE_VERSION=1.19.0
 ARG PNPM_VERSION=12.18.0
 ARG PLAYWRIGHT_VERSION=1.64.0
@@ -138,7 +138,7 @@ RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH
 # ---------------------------------------------------------------------------
 RUN pkgs=("pnpm@${PNPM_VERSION:-latest}") \
  && if [[ "${INSTALL_CLAUDE}" == "true" ]];     then pkgs+=("@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"); fi \
- && if [[ "${INSTALL_PI}" == "true" ]];         then pkgs+=("@mariozechner/pi-coding-agent@${PI_VERSION:-latest}"); fi \
+ && if [[ "${INSTALL_PI}" == "true" ]];         then pkgs+=("@earendil-works/pi-coding-agent@${PI_VERSION:-latest}"); fi \
  && if [[ "${INSTALL_OPENCODE}" == "true" ]];   then pkgs+=("opencode-ai@${OPENCODE_VERSION:-latest}"); fi \
  && if [[ "${INSTALL_PLAYWRIGHT}" == "true" ]]; then pkgs+=("playwright@${PLAYWRIGHT_VERSION:-latest}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION:-latest}" "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION:-latest}"); fi \
  && read -ra extra <<< "${NPM_EXTRA_PACKAGES}" && pkgs+=("${extra[@]}") \
