@@ -174,6 +174,53 @@ t_doctor_forwarding_missing() {
   [[ "$out" != *"✘"* ]] && ok || nok "archivo ausente no debe ser fallo"
 }
 
+# ws-doctor: aviso de Gentle-Shell. Stubs de gentle-ai/systemd-run en $SB/bin y XDG_RUNTIME_DIR temporal.
+mk_gentle_stubs() {
+  mkdir -p "$SB/bin" "$SB/run"
+  printf '#!/bin/sh\necho "gentle-ai 0.0.0"\n' > "$SB/bin/gentle-ai"
+  printf '#!/bin/sh\nexit 0\n' > "$SB/bin/systemd-run"
+  chmod +x "$SB/bin/gentle-ai" "$SB/bin/systemd-run"
+}
+doctor_gentle() { PATH="$SB/bin:$PATH" bash "$ROOT/config/ws-doctor" 2>&1 | grep -A1 'Gentle AI (Gentle-Shell)'; }
+
+t_doctor_gentle_no_runtime_dir() {
+  mk_sandbox; mk_gentle_stubs
+  local out; out="$(unset XDG_RUNTIME_DIR; doctor_gentle)"
+  assert_has "sin XDG -> sección" "$out" "Gentle AI (Gentle-Shell)"
+  assert_has "sin XDG -> explica" "$out" "Separate install"
+  assert_has "sin XDG -> alternativa" "$out" "gentle-ai install --agent pi"
+  assert_lacks "sin XDG -> no es fallo" "$out" "✘"
+}
+
+t_doctor_gentle_no_user_bus() {
+  mk_sandbox; mk_gentle_stubs
+  local out; out="$(XDG_RUNTIME_DIR="$SB/run" doctor_gentle)"
+  assert_has "sin bus -> explica" "$out" "Separate install"
+  assert_has "sin bus -> alternativa" "$out" "On my existing Pi"
+  assert_lacks "sin bus -> no es fallo" "$out" "✘"
+}
+
+t_doctor_gentle_user_manager_ok() {
+  mk_sandbox; mk_gentle_stubs
+  # Socket real del bus de usuario; si el entorno no permite sockets Unix, se omite
+  if ! python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$SB/run/bus" 2>/dev/null \
+     || [[ ! -S "$SB/run/bus" ]]; then
+    echo "   (OMITIDA: sin sockets Unix en este entorno)"; return 0
+  fi
+  local out; out="$(XDG_RUNTIME_DIR="$SB/run" doctor_gentle)"
+  assert_has "con bus -> ok" "$out" "✔"
+  assert_lacks "con bus -> sin alternativa" "$out" "--agent pi"
+}
+
+t_doctor_gentle_absent() {
+  mk_sandbox; mkdir -p "$SB/bin"
+  if PATH="$SB/bin:/usr/bin:/bin" command -v gentle-ai >/dev/null 2>&1; then
+    echo "   (OMITIDA: gentle-ai está en /usr/bin o /bin de este entorno)"; return 0
+  fi
+  local out; out="$(PATH="$SB/bin:/usr/bin:/bin" bash "$ROOT/config/ws-doctor" 2>&1)"
+  assert_lacks "sin gentle-ai -> sin sección" "$out" "Gentle AI (Gentle-Shell)"
+}
+
 run_sym t_seed_creates_both
 run_sym t_seed_symlink_target
 run_sym t_seed_claude_import
@@ -190,6 +237,10 @@ run t_guide_oauth_section
 run t_doctor_forwarding_yes
 run t_doctor_forwarding_no
 run t_doctor_forwarding_missing
+run t_doctor_gentle_no_runtime_dir
+run t_doctor_gentle_no_user_bus
+run t_doctor_gentle_user_manager_ok
+run t_doctor_gentle_absent
 
 p="$(wc -l < "$PASSES" | tr -d ' ')"; f="$(wc -l < "$FAILS" | tr -d ' ')"
 echo

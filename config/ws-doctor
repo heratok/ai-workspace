@@ -73,6 +73,18 @@ else
 fi
 fi
 
+# Gentle-Shell "Separate install" aísla cada proceso en una unidad transitoria (systemd-run --user):
+# necesita un administrador de usuario de systemd con su bus en $XDG_RUNTIME_DIR. El contenedor corre
+# docker-init, así que lo esperado es que falte: se informa, no se marca como error.
+if command -v gentle-ai >/dev/null; then
+echo "Gentle AI (Gentle-Shell):"
+if command -v systemd-run >/dev/null && [[ -n "${XDG_RUNTIME_DIR:-}" && -S "$XDG_RUNTIME_DIR/bus" ]]; then
+  ok gentle-shell "administrador de usuario de systemd disponible: 'Separate install' soportado"
+else
+  printf '  - %-14s %s\n' gentle-shell "sin administrador de usuario de systemd: 'Separate install' no funciona aquí; usa 'On my existing Pi' o gentle-ai install --agent pi"
+fi
+fi
+
 echo "Escritura sin root:"
 for d in "$HOME" /workspace "${NPM_CONFIG_PREFIX:-$HOME/.npm-global}" "$HOME/.local/bin"; do
   mkdir -p "$d" 2>/dev/null

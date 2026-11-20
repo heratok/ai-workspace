@@ -159,6 +159,7 @@ agy                # Antigravity CLI. La primera vez muestra una URL: ábrela en
 
 - Gentle AI se instala desde el binario de la versión fijada (`GENTLE_AI_VERSION`), verificado con el `checksums.txt` de su release. `gentle-ai upgrade` lo actualiza sin root (ver abajo).
 - Gentle AI escribe su configuración en tu home (`~/.claude`, configuración de opencode, etc.), dentro del volumen `ai_home`.
+- **Gentle-Shell: usa "On my existing Pi", no "Separate install".** "Separate install" aísla cada proceso en una unidad transitoria de systemd del usuario (`systemd-run --user`), y el contenedor no tiene systemd (PID 1 es `docker-init`, sin `/run/user/UID`). Por eso falla con `the delegated unit launch probe failed: set XDG_RUNTIME_DIR …`. Exportar `XDG_RUNTIME_DIR` no lo arregla. Elige **On my existing Pi** (reutiliza el Pi de la imagen) o instala por CLI con `gentle-ai install --agent pi`. CodeGraph solo está disponible con "Separate install", así que en el workspace queda apagado. `ws-doctor` lo informa en la sección "Gentle AI (Gentle-Shell)".
 - **agy en un servidor sin navegador:** también puedes hacer login en tu PC y copiar `~/.gemini/antigravity-cli/antigravity-oauth-token` a la misma ruta dentro del workspace.
 
 ### Herramientas que se actualizan solas
