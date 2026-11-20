@@ -166,7 +166,8 @@ agy                # Antigravity CLI. La primera vez muestra una URL: ábrela en
 `gentle-ai upgrade` y `herdr update` reemplazan su propio binario. La imagen los trae en `/usr/local/bin`, que es de root, así que al arrancar el contenedor cada uno tiene una **copia tuya en `~/.local/bin`**, que va primero en el `PATH`. Sus actualizadores reescriben esa copia sin root, y la versión nueva queda en tu home (volumen `ai_home`).
 
 - Si la copia falta o la imagen trae una versión **más nueva** que la tuya (después de un `./setup.sh update`), se reemplaza.
-- Si tu copia es **igual o más nueva**, se conserva: un reinicio no deshace tu actualización.
+- Si tu copia es **igual o más nueva**, se conserva: un reinicio no deshace tu actualización. Por lo mismo, un `./setup.sh rollback` a una imagen más vieja no baja tu copia.
+- Una prerelease (por ejemplo `0.9.5-rc.1`) cuenta como anterior a su versión final. Si no se puede leer la versión de tu copia, se conserva y el arranque lo avisa en el log.
 - Para volver a la versión de la imagen: `rm ~/.local/bin/gentle-ai` (o `herdr`) y reinicia el contenedor.
 
 ### Doppler (secretos)

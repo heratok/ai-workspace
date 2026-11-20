@@ -11,7 +11,8 @@ log() { echo "[entrypoint] $*"; }
 
 # El home es un volumen que controla "ai": root no debe crear, chown ni chmod a través de un
 # enlace simbólico que él haya puesto (~/.cache -> /usr/local/bin le daría root en el próximo arranque).
-# Antes de arrancar sshd no corre ningún proceso de "ai", así que la comprobación no tiene carrera.
+# Hasta la sección 4a no corre ningún proceso de "ai", así que estas comprobaciones (sección 4) no tienen carrera.
+# Cualquier comprobación nueva de root sobre el home debe ir antes de 4a.
 symlink_in_home() {   # symlink_in_home RUTA_RELATIVA -> 0 si algún componente es un enlace simbólico
   local p="$HOME_DIR" part parts
   IFS=/ read -ra parts <<< "$1"
@@ -70,20 +71,41 @@ fi
 # 4a. Herramientas que se actualizan solas (gentle-ai upgrade, herdr update) reescriben su propio binario, y en
 #     /usr/local/bin (root) no pueden. Cada una tiene una copia del usuario en ~/.local/bin, que va primero en el PATH:
 #     se crea si falta y se reemplaza solo cuando la imagen trae una versión más nueva (lo que actualizó el usuario
-#     se conserva). Todo corre como "ai": root nunca ejecuta ni sigue archivos del home.
+#     se conserva; una versión que no se puede leer, también). Todo corre como "ai" con un entorno limpio: root nunca
+#     ejecuta ni sigue archivos del home. Es lo primero de "ai" que se ejecuta: las comprobaciones de enlaces de la
+#     sección 4 ya terminaron. Una copia rota no puede colgar el arranque: cada "--version" tiene 5 s (y KILL después),
+#     su salida va a un archivo (no a una tubería que un proceso hijo pueda dejar abierta) y todo el bloque, 60 s.
 SELF_UPDATING_TOOLS=(gentle-ai herdr)
 for tool in "${SELF_UPDATING_TOOLS[@]}"; do
   [[ -x "/usr/local/bin/$tool" ]] || continue
   # shellcheck disable=SC2016 # se expande en el shell del usuario
-  runuser -u "$USERNAME" -- env HOME="$HOME_DIR" bash -c '
-    src="/usr/local/bin/$1"; dst="$HOME/.local/bin/$1"
-    ver() { timeout 10 "$1" --version 2>/dev/null | head -n1 | grep -oE "[0-9]+(\.[0-9]+)+" | head -n1; }
+  timeout -k 5 60 runuser -u "$USERNAME" -- env -i HOME="$HOME_DIR" USER="$USERNAME" LOGNAME="$USERNAME" \
+    PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 bash -c '
+    src="/usr/local/bin/$1"; dst="$HOME/.local/bin/$1"; tmp="$dst.new.$$"
+    trap "rm -f \"$tmp\"" EXIT
+    ver() {   # versión (con sufijo de prerelease) que imprime "$1 --version", o vacío
+      local out; out="$(mktemp)" || return 0
+      timeout -k 2 5 "$1" --version </dev/null >"$out" 2>/dev/null
+      head -n1 "$out" | grep -oE "[0-9]+(\.[0-9]+)+(-[0-9A-Za-z.]+)?" | head -n1
+      rm -f "$out"
+    }
+    newer() {   # ¿$1 es más nueva que $2? Una prerelease (x.y.z-rc.1) es anterior a su versión final (x.y.z)
+      [[ "$1" != "$2" ]] || return 1
+      local a="${1%%-*}" b="${2%%-*}"
+      if [[ "$a" == "$b" ]]; then [[ "$1" != *-* && "$2" == *-* ]]; return; fi
+      [[ "$(printf "%s\n%s\n" "$a" "$b" | sort -V | tail -n1)" == "$a" ]]
+    }
     new="$(ver "$src")"; [[ -n "$new" ]] || exit 0
+    if [[ -d "$dst" && ! -L "$dst" ]]; then echo "[entrypoint] AVISO: $dst es una carpeta; se omite"; exit 0; fi
     if [[ -e "$dst" || -L "$dst" ]]; then
       cur="$(ver "$dst")"
-      [[ -n "$cur" && "$(printf "%s\n%s\n" "$cur" "$new" | sort -V | tail -n1)" == "$cur" ]] && exit 0
+      if [[ -z "$cur" ]]; then
+        echo "[entrypoint] AVISO: no se pudo leer la versión de $dst; se conserva (bórralo para usar la de la imagen)"
+        exit 0
+      fi
+      newer "$new" "$cur" || exit 0
     fi
-    install -m 0755 "$src" "$dst.new.$$" && mv -f "$dst.new.$$" "$dst" && echo "[entrypoint] $1 $new -> ~/.local/bin"
+    install -m 0755 "$src" "$tmp" && mv -f "$tmp" "$dst" && echo "[entrypoint] $1 $new -> ~/.local/bin"
   ' _ "$tool" || log "AVISO: no se pudo dejar la copia de usuario de $tool"
 done
 

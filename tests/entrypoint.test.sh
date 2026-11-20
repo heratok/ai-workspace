@@ -131,9 +131,14 @@ t_herdr_autostart_can_be_disabled() {   # HERDR_AUTOSTART=false en el .env
 }
 
 ver_of() { as_ai "$1" "\"\$HOME/.local/bin/$2\" --version 2>/dev/null | head -n1"; }
-fake_tool() {   # fake_tool <nombre> <herramienta> <versión>: una copia del usuario que solo dice su versión
-  as_ai "$1" "printf '#!/bin/sh\necho \"$2 $3\"\n' > ~/.local/bin/$2 && chmod 755 ~/.local/bin/$2"
+# put_tool <nombre> <herramienta> <script>: reemplaza la copia del usuario (archivo nuevo + mv: un binario en uso
+# no se puede sobrescribir) y comprueba que quedó, para que la prueba no pase sin haber plantado nada
+put_tool() {
+  docker exec -i -u ai "$P-$1" sh -c "cat > ~/.local/bin/.$2.t && chmod 755 ~/.local/bin/.$2.t && mv -f ~/.local/bin/.$2.t ~/.local/bin/$2" <<< "$3" \
+    || nok "no se pudo plantar ~/.local/bin/$2"
 }
+fake_tool() { put_tool "$1" "$2" "$(printf '#!/bin/sh\necho "%s %s"' "$2" "$3")"; assert_eq "plantado $2 $3" "$2 $3" "$(ver_of "$1" "$2")"; }
+restart_ws() { docker restart "$P-$1" >/dev/null; wait_ready "$1" 2; }
 
 t_self_updating_tools_get_a_user_copy() {   # gentle-ai upgrade / herdr update reescriben su binario: en /usr/local/bin no pueden
   start_ws tools; wait_ready tools || { nok "el contenedor no arrancó"; return 0; }
@@ -150,14 +155,34 @@ t_user_tool_copy_is_kept_unless_the_image_is_newer() {   # lo que actualizó el 
   start_ws keep; wait_ready keep || { nok "el contenedor no arrancó"; return 0; }
   fake_tool keep gentle-ai 99.0.0
   fake_tool keep herdr 0.0.1
-  docker restart "$P-keep" >/dev/null; wait_ready keep 2 || { nok "no rearrancó"; return 0; }
+  restart_ws keep || { nok "no rearrancó"; return 0; }
   assert_eq "gentle-ai más nuevo del usuario se conserva" "gentle-ai 99.0.0" "$(ver_of keep gentle-ai)"
   assert_eq "herdr viejo del usuario se reemplaza" "$(docker exec "$P-keep" /usr/local/bin/herdr --version | head -n1)" "$(ver_of keep herdr)"
+  assert_eq "sin temporales huérfanos" "" "$(as_ai keep 'ls -a ~/.local/bin | grep -E "\.new\." || true')"
+}
+
+t_user_tool_versions_compare_prereleases_and_unreadable_copies() {   # 0.9.4-rc.1 < 0.9.4; una versión ilegible no se pisa
+  start_ws ver -e HERDR_AUTOSTART=false; wait_ready ver || { nok "el contenedor no arrancó"; return 0; }
+  local img; img="$(docker exec "$P-ver" /usr/local/bin/herdr --version | head -n1 | grep -oE '[0-9]+(\.[0-9]+)+')"
+  fake_tool ver herdr "$img-rc.1"
+  put_tool ver gentle-ai "$(printf '#!/bin/sh\necho "sin version"')"
+  restart_ws ver || { nok "no rearrancó"; return 0; }
+  assert_eq "una prerelease de la misma versión se reemplaza por la final" "herdr $img" "$(ver_of ver herdr)"
+  assert_eq "una copia sin versión legible se conserva" "sin version" "$(ver_of ver gentle-ai)"
+}
+
+t_broken_user_tool_copy_cannot_block_boot() {   # una copia que se cuelga, ignora TERM y deja stdout abierto
+  start_ws hang -e HERDR_AUTOSTART=false; wait_ready hang || { nok "el contenedor no arrancó"; return 0; }
+  put_tool hang gentle-ai "$(printf '#!/bin/bash\nid -u >> /tmp/who-ran-tool\ntrap "" TERM\n(setsid sleep 600 &)\nsleep 600')"
+  restart_ws hang || { nok "el arranque se colgó por la copia del usuario"; return 0; }
+  ok
+  assert_eq "la copia del usuario corrió como ai" 1000 "$(docker exec "$P-hang" sort -u /tmp/who-ran-tool 2>/dev/null | tr '\n' ' ' | xargs)"
 }
 
 for t in t_fresh_home_gets_install_dirs_owned_by_ai t_planted_symlinks_are_not_followed_by_root t_sshd_forwarding_is_restricted \
          t_stop_shuts_down_devdb_cleanly t_herdr_server_starts_with_the_container t_herdr_autostart_can_be_disabled \
-         t_self_updating_tools_get_a_user_copy t_user_tool_copy_is_kept_unless_the_image_is_newer; do
+         t_self_updating_tools_get_a_user_copy t_user_tool_copy_is_kept_unless_the_image_is_newer \
+         t_user_tool_versions_compare_prereleases_and_unreadable_copies t_broken_user_tool_copy_cannot_block_boot; do
   run "$t"
 done
 
