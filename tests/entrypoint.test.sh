@@ -32,10 +32,12 @@ fi
 # Mismas capacidades y opciones que el servicio ai-workspace de docker-compose.yml
 CAPS=(--cap-drop ALL --cap-add AUDIT_WRITE --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_CHROOT)
 
-# start_ws <nombre>: contenedor con volúmenes propios y el código del repo montado encima de la imagen
+# start_ws <nombre> [opciones extra de docker run]: contenedor con volúmenes propios y el código del repo
+# montado encima de la imagen
 start_ws() {
-  docker run -d --name "$P-$1" --init "${CAPS[@]}" --security-opt no-new-privileges:true \
-    -v "$P-$1-home:/home/ai" -v "$P-$1-ws:/workspace" -v "$P-$1-keys:/etc/ssh/host_keys" \
+  local name="$1"; shift
+  docker run -d --name "$P-$name" --init "${CAPS[@]}" --security-opt no-new-privileges:true "$@" \
+    -v "$P-$name-home:/home/ai" -v "$P-$name-ws:/workspace" -v "$P-$name-keys:/etc/ssh/host_keys" \
     -v "$ROOT/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
     -v "$ROOT/config/sshd-ai-workspace.conf:/etc/ssh/sshd_config.d/10-ai-workspace.conf:ro" \
     "$IMAGE" >/dev/null
@@ -105,8 +107,31 @@ t_stop_shuts_down_devdb_cleanly() {          # docker stop: PostgreSQL y Redis s
   assert_has "Redis se apagó limpio" "$(docker cp "$P-db:$d/redis.log" - 2>/dev/null | tar -xO)" "ready to exit"
 }
 
+herdr_status() { as_ai "$1" 'herdr status server 2>&1' | sed -n 's/^status: //p'; }
+wait_herdr() {   # wait_herdr <nombre>: hasta 20 s a que el servidor de Herdr responda
+  local i s=""
+  for ((i = 0; i < 20; i++)); do s="$(herdr_status "$1")"; [[ "$s" == running ]] && break; sleep 1; done
+  echo "$s"
+}
+
+t_herdr_server_starts_with_the_container() {   # Ovis y los clientes de Herdr necesitan el servidor sin abrir una sesión SSH
+  start_ws herdr; wait_ready herdr || { nok "el contenedor no arrancó"; return 0; }
+  assert_eq "servidor de Herdr" running "$(wait_herdr herdr)"
+  assert_eq "corre como ai" ai "$(docker exec "$P-herdr" ps -o user= -C herdr | sort -u | tr -d ' ')"
+  docker stop -t 30 "$P-herdr" >/dev/null
+  local code; code="$(docker inspect -f '{{.State.ExitCode}}' "$P-herdr")"
+  if [[ "$code" == 137 ]]; then nok "el contenedor murió por SIGKILL (137)"; else ok; fi
+  assert_has "se detiene al apagar" "$(docker logs "$P-herdr" 2>&1)" "Deteniendo Herdr"
+}
+
+t_herdr_autostart_can_be_disabled() {   # HERDR_AUTOSTART=false en el .env
+  start_ws noherdr -e HERDR_AUTOSTART=false; wait_ready noherdr || { nok "el contenedor no arrancó"; return 0; }
+  sleep 3
+  assert_lacks "sin servidor de Herdr" "$(docker exec "$P-noherdr" ps -eo comm=)" "herdr"
+}
+
 for t in t_fresh_home_gets_install_dirs_owned_by_ai t_planted_symlinks_are_not_followed_by_root t_sshd_forwarding_is_restricted \
-         t_stop_shuts_down_devdb_cleanly; do
+         t_stop_shuts_down_devdb_cleanly t_herdr_server_starts_with_the_container t_herdr_autostart_can_be_disabled; do
   run "$t"
 done
 

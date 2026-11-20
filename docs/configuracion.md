@@ -28,6 +28,7 @@ Si cambias una variable de la imagen (`NODE_*`, `NPM_*`, `INSTALL_*`, `PG_*`, `U
 |---|---|---|
 | `USER_UID` / `USER_GID` | `1000` | Deben coincidir con el dueño actual del volumen `ai_home` |
 | `FIX_OWNERSHIP` | `false` | Ponla en `true` **una sola vez** si cambiaste el UID o GID; hace un `chown` recursivo del home y del workspace |
+| `HERDR_AUTOSTART` | `true` | Arranca el servidor de [Herdr](herramientas.md#herdr-incluido) con el contenedor; `false` lo desactiva |
 | `MEM_LIMIT` / `CPUS` | `8g` / `4` | Topes de memoria y CPUs del workspace. En una instalación nueva se sugieren según el servidor |
 | `SHM_SIZE` / `PIDS_LIMIT` | `2gb` / `2048` | Memoria compartida (`/dev/shm`) y máximo de procesos |
 | `MSSQL_MEM_LIMIT` | `4g` | Tope de memoria del contenedor de SQL Server |

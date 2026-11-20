@@ -133,6 +133,8 @@ services:
       DOPPLER_TOKEN: ${DOPPLER_TOKEN:-}
       # Nombre del equipo en la tailnet: devdb lo usa en las instrucciones de túnel SSH
       AIWS_HOSTNAME: ${TS_HOSTNAME:-${AIWS_NAME:-ai-workspace}}
+      # Servidor de Herdr al iniciar el contenedor (lo usan Ovis y las apps de Herdr); false lo desactiva
+      HERDR_AUTOSTART: ${HERDR_AUTOSTART:-true}
 
     volumes:
       - ai_home:/home/ai                            # datos/config del usuario
