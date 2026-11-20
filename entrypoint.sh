@@ -67,6 +67,26 @@ if ! symlink_in_home .ssh; then
   fi
 fi
 
+# 4a. Herramientas que se actualizan solas (gentle-ai upgrade, herdr update) reescriben su propio binario, y en
+#     /usr/local/bin (root) no pueden. Cada una tiene una copia del usuario en ~/.local/bin, que va primero en el PATH:
+#     se crea si falta y se reemplaza solo cuando la imagen trae una versión más nueva (lo que actualizó el usuario
+#     se conserva). Todo corre como "ai": root nunca ejecuta ni sigue archivos del home.
+SELF_UPDATING_TOOLS=(gentle-ai herdr)
+for tool in "${SELF_UPDATING_TOOLS[@]}"; do
+  [[ -x "/usr/local/bin/$tool" ]] || continue
+  # shellcheck disable=SC2016 # se expande en el shell del usuario
+  runuser -u "$USERNAME" -- env HOME="$HOME_DIR" bash -c '
+    src="/usr/local/bin/$1"; dst="$HOME/.local/bin/$1"
+    ver() { timeout 10 "$1" --version 2>/dev/null | head -n1 | grep -oE "[0-9]+(\.[0-9]+)+" | head -n1; }
+    new="$(ver "$src")"; [[ -n "$new" ]] || exit 0
+    if [[ -e "$dst" || -L "$dst" ]]; then
+      cur="$(ver "$dst")"
+      [[ -n "$cur" && "$(printf "%s\n%s\n" "$cur" "$new" | sort -V | tail -n1)" == "$cur" ]] && exit 0
+    fi
+    install -m 0755 "$src" "$dst.new.$$" && mv -f "$dst.new.$$" "$dst" && echo "[entrypoint] $1 $new -> ~/.local/bin"
+  ' _ "$tool" || log "AVISO: no se pudo dejar la copia de usuario de $tool"
+done
+
 # 4b. Sembrar la guía para agentes en /workspace (solo si no existen; nunca pisa archivos del usuario)
 bash /etc/ai-workspace/seed-guide.sh || log "AVISO: no se pudo sembrar la guía de agentes"
 

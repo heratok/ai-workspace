@@ -130,8 +130,34 @@ t_herdr_autostart_can_be_disabled() {   # HERDR_AUTOSTART=false en el .env
   assert_lacks "sin servidor de Herdr" "$(docker exec "$P-noherdr" ps -eo comm=)" "herdr"
 }
 
+ver_of() { as_ai "$1" "\"\$HOME/.local/bin/$2\" --version 2>/dev/null | head -n1"; }
+fake_tool() {   # fake_tool <nombre> <herramienta> <versión>: una copia del usuario que solo dice su versión
+  as_ai "$1" "printf '#!/bin/sh\necho \"$2 $3\"\n' > ~/.local/bin/$2 && chmod 755 ~/.local/bin/$2"
+}
+
+t_self_updating_tools_get_a_user_copy() {   # gentle-ai upgrade / herdr update reescriben su binario: en /usr/local/bin no pueden
+  start_ws tools; wait_ready tools || { nok "el contenedor no arrancó"; return 0; }
+  local t
+  for t in gentle-ai herdr; do
+    assert_eq "$t: misma versión que la imagen" "$(docker exec "$P-tools" "/usr/local/bin/$t" --version | head -n1)" "$(ver_of tools "$t")"
+    assert_eq "$t: del usuario" ai "$(owner tools "/home/ai/.local/bin/$t")"
+    assert_eq "$t: el usuario lo puede reemplazar" yes "$(as_ai tools "test -w ~/.local/bin && echo yes")"
+    assert_eq "$t: es el que se ejecuta" "/home/ai/.local/bin/$t" "$(docker exec -u ai "$P-tools" zsh -lc "command -v $t")"
+  done
+}
+
+t_user_tool_copy_is_kept_unless_the_image_is_newer() {   # lo que actualizó el usuario no se pisa; una imagen más nueva sí lo reemplaza
+  start_ws keep; wait_ready keep || { nok "el contenedor no arrancó"; return 0; }
+  fake_tool keep gentle-ai 99.0.0
+  fake_tool keep herdr 0.0.1
+  docker restart "$P-keep" >/dev/null; wait_ready keep 2 || { nok "no rearrancó"; return 0; }
+  assert_eq "gentle-ai más nuevo del usuario se conserva" "gentle-ai 99.0.0" "$(ver_of keep gentle-ai)"
+  assert_eq "herdr viejo del usuario se reemplaza" "$(docker exec "$P-keep" /usr/local/bin/herdr --version | head -n1)" "$(ver_of keep herdr)"
+}
+
 for t in t_fresh_home_gets_install_dirs_owned_by_ai t_planted_symlinks_are_not_followed_by_root t_sshd_forwarding_is_restricted \
-         t_stop_shuts_down_devdb_cleanly t_herdr_server_starts_with_the_container t_herdr_autostart_can_be_disabled; do
+         t_stop_shuts_down_devdb_cleanly t_herdr_server_starts_with_the_container t_herdr_autostart_can_be_disabled \
+         t_self_updating_tools_get_a_user_copy t_user_tool_copy_is_kept_unless_the_image_is_newer; do
   run "$t"
 done
 

@@ -145,7 +145,7 @@ herdr          # abre o retoma tus sesiones de agentes (Claude Code, opencode, P
 
 El servidor de Herdr arranca solo con el contenedor, como el usuario `ai`. Así lo encuentran sus clientes, como [Ovis](https://github.com/devswha/ovis) en el móvil o el navegador, sin que abras una sesión SSH, y `herdr` por SSH se conecta a ese mismo servidor. Se detiene limpio al apagar el contenedor. Para desactivarlo, pon `HERDR_AUTOSTART=false` en el `.env` y ejecuta `./setup.sh update`. Si no arranca, el motivo queda en `~/.config/herdr/herdr-autostart.log`.
 
-Se instala en `/usr/local/bin` desde el binario de la versión fijada (`HERDR_VERSION`), verificado con su SHA-256; no se ejecuta ningún instalador descargado en el momento (ver [versiones fijadas](configuracion.md#versiones-fijadas-de-la-imagen)). Se actualiza con `./setup.sh update`. Para una versión más nueva solo para ti, sin root: `curl -fsSL https://herdr.dev/install.sh | sh` (instala en `~/.local/bin`, que tiene prioridad en el `PATH`).
+Se instala en `/usr/local/bin` desde el binario de la versión fijada (`HERDR_VERSION`), verificado con su SHA-256; no se ejecuta ningún instalador descargado en el momento (ver [versiones fijadas](configuracion.md#versiones-fijadas-de-la-imagen)). Se actualiza con `./setup.sh update`, o solo para ti con `herdr update`, sin root (ver [herramientas que se actualizan solas](#herramientas-que-se-actualizan-solas)).
 
 ### Gentle AI y Antigravity CLI (agy)
 
@@ -157,9 +157,17 @@ agy                # Antigravity CLI. La primera vez muestra una URL: ábrela en
                    # aprueba con tu cuenta Google y pega el código (tienes ~30 s)
 ```
 
-- Gentle AI se instala desde el binario de la versión fijada (`GENTLE_AI_VERSION`), verificado con el `checksums.txt` de su release.
+- Gentle AI se instala desde el binario de la versión fijada (`GENTLE_AI_VERSION`), verificado con el `checksums.txt` de su release. `gentle-ai upgrade` lo actualiza sin root (ver abajo).
 - Gentle AI escribe su configuración en tu home (`~/.claude`, configuración de opencode, etc.), dentro del volumen `ai_home`.
 - **agy en un servidor sin navegador:** también puedes hacer login en tu PC y copiar `~/.gemini/antigravity-cli/antigravity-oauth-token` a la misma ruta dentro del workspace.
+
+### Herramientas que se actualizan solas
+
+`gentle-ai upgrade` y `herdr update` reemplazan su propio binario. La imagen los trae en `/usr/local/bin`, que es de root, así que al arrancar el contenedor cada uno tiene una **copia tuya en `~/.local/bin`**, que va primero en el `PATH`. Sus actualizadores reescriben esa copia sin root, y la versión nueva queda en tu home (volumen `ai_home`).
+
+- Si la copia falta o la imagen trae una versión **más nueva** que la tuya (después de un `./setup.sh update`), se reemplaza.
+- Si tu copia es **igual o más nueva**, se conserva: un reinicio no deshace tu actualización.
+- Para volver a la versión de la imagen: `rm ~/.local/bin/gentle-ai` (o `herdr`) y reinicia el contenedor.
 
 ### Doppler (secretos)
 
