@@ -105,20 +105,22 @@ Algunas herramientas (pi, MCPs con OAuth, etc.) abren una URL de login cuyo `red
 Tres métodos, en este orden:
 
 - **A) Agregar el túnel sin reconectar.** Dentro de la sesión SSH pulsa `~C` (al inicio de una línea, tras Enter) y escribe `-L PUERTO:127.0.0.1:PUERTO`. Luego abre la URL de login en tu navegador. Sirve para puertos aleatorios.
-- **B) Puerto fijo en `~/.ssh/config` (Windows: `%USERPROFILE%\.ssh\config`).** Para herramientas con puerto fijo, como pi (`53692`):
+- **B) Puerto fijo en `~/.ssh/config` (Windows: `%USERPROFILE%\.ssh\config`).** Para herramientas con puerto fijo, como pi (`53692`; `1455` al iniciar sesión con OpenAI/ChatGPT):
 
   ```
   Host ai-workspace
       HostName ai-workspace
       User ai
       LocalForward 53692 127.0.0.1:53692
+      LocalForward 1455 127.0.0.1:1455
   ```
 
-  `53692` es el puerto de pi. Para puertos aleatorios usa A o C.
-- **C) Sin túnel (probar primero; no verificado con todas las herramientas).** Tras autorizar, copia la URL completa de la barra de direcciones (la del error) y, dentro del contenedor y mientras la herramienta sigue esperando, ejecuta `curl '<url>'`.
+  Para un login puntual, sin tocar la config: `ssh -L 1455:127.0.0.1:1455 ai@ai-workspace` y lanza el login desde esa sesión. Si otro programa de tu PC ya usa el puerto (por ejemplo Codex CLI, que también usa `1455`), `ssh` avisa que no pudo hacer el bind: ciérralo antes. Para puertos aleatorios usa A o C.
+- **C) Sin túnel (probar primero; verificado con pi y OpenAI/ChatGPT, no con todas las herramientas).** Tras autorizar, copia la URL completa de la barra de direcciones (la del error) y, dentro del contenedor y mientras la herramienta sigue esperando, ejecuta en otra terminal `curl '<url>'`. Usa comillas simples: sin ellas, el `&` corta la URL. Hazlo enseguida, porque el `code` es de un solo uso y vence en minutos. Funciona también con `mosh`.
 
 Notas:
 
+- **Tailscale no basta.** El `redirect_uri` lo fija el proveedor (OpenAI solo acepta `http://127.0.0.1:1455/...` para ese cliente), y no se puede cambiar por la IP 100.x ni por `ai-workspace`. Además, la herramienta suele escuchar solo en el loopback del contenedor, al que no se llega por la IP de Tailscale. Tailscale conecta las máquinas; el túnel o el `curl` del método C llevan la respuesta al loopback correcto.
 - `mosh` no reenvía puertos: abre una sesión aparte con `ssh -N -L PUERTO:127.0.0.1:PUERTO ai@ai-workspace`.
 - No lo necesitan `gh auth login`, `doppler login` ni `agy` (usan flujos de código o pegado).
 - `ws-doctor` comprueba que el reenvío de puertos esté habilitado.
