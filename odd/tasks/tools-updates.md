@@ -44,7 +44,7 @@ aiws.test.sh (EXPECTED_CMDS), docs.test.sh.
 - [x] T2 Tests (RED) + update-pins.sh v2 (registry, npm/gh/agy sources, check, env target, reset)
 - [x] T3 Tests (RED) + lib/tools.sh, setup.sh wiring (command, menu entry, notice), aiws, modules test
 - [x] T4 Verify against REAL APIs (read-only) and the full flow in a sandbox with a fake docker
-- [ ] T5 Docs (operation, configuration, tools), CI wiring, PR; CI builds the real image
+- [x] T5 Docs (operation, configuration, tools), CI wiring, PR; CI builds the real image (30e4a87, fdec9e6)
 
 ## Verification
 All suites; ShellCheck `-x -S warning` (pinned image, run on the VPS); real `check` against the live

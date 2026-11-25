@@ -40,7 +40,7 @@ with stubbed `docker`), added to CI.
 - [x] T3 docker-compose.yml + env.example: interpolated names with back-compat defaults
 - [x] T4 install.sh: automatic alias detection/prompt, `--alias` flag, per-instance dir
 - [x] T5 CI runs tests; README documents multi-instance
-- [ ] T6 Verification: bash -n, shellcheck -S error, compose config (default + alias), tests GREEN
+- [x] T6 Verification: bash -n, shellcheck -S error, compose config (default + alias), tests GREEN (c804680)
 - [x] T7 `aiws` host command: instance discovery (labels/owner folder + ~/ai-workspace* clones), `aiws ls`
 - [x] T8 `aiws upgrade <alias...>` / `--all` / no args = interactive multi-select; sequential, continue on failure, final summary
 - [x] T9 `aiws <cmd> <alias>` passthrough to that instance's setup.sh (status, doctor, shell, backup, uninstall...)
